@@ -1,0 +1,45 @@
+{
+  "frame_id": "000001",
+  "objects": [
+    {
+      "id": 1,
+      "class_name": "car",
+      "x": 12.0,
+      "y": 3.0,
+      "z": 0.0,
+      "length": 4.5,
+      "width": 1.9,
+      "yaw": 0.15
+    },
+    {
+      "id": 2,
+      "class_name": "car",
+      "x": 24.0,
+      "y": -5.0,
+      "z": 0.0,
+      "length": 4.7,
+      "width": 2.0,
+      "yaw": -0.25
+    },
+    {
+      "id": 3,
+      "class_name": "pedestrian",
+      "x": 18.0,
+      "y": 7.5,
+      "z": 0.0,
+      "length": 0.8,
+      "width": 0.8,
+      "yaw": 0.0
+    },
+    {
+      "id": 4,
+      "class_name": "cone",
+      "x": 8.0,
+      "y": -8.0,
+      "z": 0.0,
+      "length": 0.5,
+      "width": 0.5,
+      "yaw": 0.0
+    }
+  ]
+}
