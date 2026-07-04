@@ -1,0 +1,130 @@
+from collections import deque
+
+import numpy as np
+
+#点云过滤
+def filter_obstacle_points(
+    points,
+    x_range=(0.0, 40.0),
+    y_range=(-20.0, 20.0),
+    z_min=-0.9,
+    intensity_min=0.38,
+):
+    mask = (
+        (points[:, 0] >= x_range[0])
+        & (points[:, 0] < x_range[1])
+        & (points[:, 1] >= y_range[0])
+        & (points[:, 1] < y_range[1])
+        & (points[:, 2] >= z_min)
+        & (points[:, 3] >= intensity_min)
+    )
+    return points[mask]
+
+# 以距离画线，放入对应的网格里
+def _build_grid(points_xy, cell_size):
+    grid = {}
+    coords = np.floor(points_xy / cell_size).astype(np.int32)
+    for idx, coord in enumerate(coords):
+        key = (int(coord[0]), int(coord[1]))
+        grid.setdefault(key, []).append(idx)
+    return grid, coords
+
+
+def _region_query(point_idx, points_xy, grid, coords, eps):
+    cx, cy = coords[point_idx]
+    neighbors = []
+    eps2 = eps * eps
+
+    for gx in range(cx - 1, cx + 2):
+        for gy in range(cy - 1, cy + 2):
+            for other_idx in grid.get((gx, gy), []):
+                diff = points_xy[other_idx] - points_xy[point_idx]
+                if float(diff @ diff) <= eps2:
+                    neighbors.append(other_idx)
+
+    return neighbors
+
+
+def euclidean_cluster(points, eps=0.6, min_points=20):
+    if len(points) == 0:
+        return []
+
+    points_xy = points[:, :2]
+    grid, coords = _build_grid(points_xy, eps)
+    visited = np.zeros(len(points), dtype=bool)
+    clustered = np.zeros(len(points), dtype=bool)
+    clusters = []
+
+    for start_idx in range(len(points)):
+        if visited[start_idx]:
+            continue
+
+        visited[start_idx] = True
+        neighbors = _region_query(start_idx, points_xy, grid, coords, eps)
+        if len(neighbors) < min_points:
+            continue
+
+        cluster_indices = []
+        queue = deque(neighbors)
+        clustered[start_idx] = True
+        cluster_indices.append(start_idx)
+
+        while queue:
+            idx = queue.popleft()
+
+            if not visited[idx]:
+                visited[idx] = True
+                idx_neighbors = _region_query(idx, points_xy, grid, coords, eps)
+                if len(idx_neighbors) >= min_points:
+                    queue.extend(idx_neighbors)
+
+            if not clustered[idx]:
+                clustered[idx] = True
+                cluster_indices.append(idx)
+
+        clusters.append(points[cluster_indices])
+
+    return clusters
+
+
+def classify_cluster(length, width, num_points):
+    max_dim = max(length, width)
+    min_dim = min(length, width)
+
+    if max_dim >= 2.0 or num_points >= 500:
+        return "car"
+    if max_dim >= 0.65 or min_dim >= 0.55:
+        return "pedestrian"
+    return "cone"
+
+
+def cluster_to_box(cluster, det_id):
+    x_min, y_min = cluster[:, 0].min(), cluster[:, 1].min()
+    x_max, y_max = cluster[:, 0].max(), cluster[:, 1].max()
+    z_min, z_max = cluster[:, 2].min(), cluster[:, 2].max()
+
+    length = float(max(x_max - x_min, 0.1))
+    width = float(max(y_max - y_min, 0.1))
+    num_points = int(len(cluster))
+    class_name = classify_cluster(length, width, num_points)
+    score = min(0.99, 0.45 + 0.001 * num_points)
+
+    return {
+        "id": f"cluster_{det_id}",
+        "class_name": class_name,
+        "x": float((x_min + x_max) / 2.0),
+        "y": float((y_min + y_max) / 2.0),
+        "z": float((z_min + z_max) / 2.0),
+        "length": length,
+        "width": width,
+        "yaw": 0.0,
+        "score": float(score),
+        "num_points": num_points,
+    }
+
+
+def detect_objects_from_points(points, eps=0.6, min_points=20):
+    obstacle_points = filter_obstacle_points(points)
+    clusters = euclidean_cluster(obstacle_points, eps=eps, min_points=min_points)
+    detections = [cluster_to_box(cluster, idx + 1) for idx, cluster in enumerate(clusters)]
+    return detections
