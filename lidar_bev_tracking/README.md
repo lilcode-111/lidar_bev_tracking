@@ -28,6 +28,7 @@ PYTHONPATH=src python scripts/visualize_bev.py
 PYTHONPATH=src python scripts/run_nms_demo.py
 PYTHONPATH=src python scripts/run_tracking_demo.py
 PYTHONPATH=src python scripts/run_clustering_detection_demo.py
+PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 ```
 
@@ -57,6 +58,15 @@ data/kitti/
 ```
 
 `velodyne/*.bin` is required for the KITTI demo. `label_2/*.txt` is optional and is parsed for later evaluation/visualization work.
+
+For a tiny smoke test without downloading KITTI, generate a synthetic KITTI-layout frame:
+
+```bash
+PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
+```
+
+This only validates the file layout and reader path; it is not a real KITTI benchmark result.
 
 ## Roadmap
 
