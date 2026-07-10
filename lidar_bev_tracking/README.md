@@ -18,6 +18,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Load KITTI Object Detection LiDAR `.bin` files and run the clustering detector on real point clouds.
 - Parse KITTI calibration files and overlay LiDAR-frame GT boxes with detections in BEV.
 - Evaluate BEV detections with IoU matching, TP/FP/FN, precision, and recall.
+- Estimate PCA-oriented boxes for clustering-based LiDAR detections.
 
 ## Quick Start
 
@@ -30,10 +31,12 @@ PYTHONPATH=src python scripts/visualize_bev.py
 PYTHONPATH=src python scripts/run_nms_demo.py
 PYTHONPATH=src python scripts/run_tracking_demo.py
 PYTHONPATH=src python scripts/run_clustering_detection_demo.py
+PYTHONPATH=src python scripts/run_oriented_clustering_demo.py
 PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriented
 ```
 
 ## Outputs
@@ -45,9 +48,11 @@ outputs/figures/nms_after.png
 outputs/figures/tracking_frame_000000.png
 outputs/figures/tracking_frame_000007.png
 outputs/figures/clustering_detection.png
+outputs/figures/oriented_clustering_detection.png
 outputs/figures/kitti_clustering_000000.png
 outputs/figures/kitti_gt_overlay_000000.png
-outputs/reports/kitti_eval_000000.json
+outputs/reports/kitti_eval_000000_axis_aligned.json
+outputs/reports/kitti_eval_000000_oriented.json
 ```
 
 ## KITTI Data Layout
@@ -74,6 +79,7 @@ PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriented
 ```
 
 This only validates the file layout, reader path, simplified calibration parsing, GT overlay path, and BEV evaluation flow; it is not a real KITTI benchmark result.
@@ -82,6 +88,5 @@ This only validates the file layout, reader path, simplified calibration parsing
 
 - Add Kalman Filter prediction.
 - Add Hungarian matching.
-- Replace axis-aligned cluster boxes with PCA-oriented boxes.
 - Add KITTI label-based detection metrics.
 - Integrate nuScenes-style data.

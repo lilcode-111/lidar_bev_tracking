@@ -2,7 +2,9 @@ from collections import deque
 
 import numpy as np
 
-#点云过滤
+from bev_tracking.oriented_box import estimate_oriented_box_xy
+
+
 def filter_obstacle_points(
     points,
     x_range=(0.0, 40.0),
@@ -20,7 +22,7 @@ def filter_obstacle_points(
     )
     return points[mask]
 
-# 以距离画线，放入对应的网格里
+
 def _build_grid(points_xy, cell_size):
     grid = {}
     coords = np.floor(points_xy / cell_size).astype(np.int32)
@@ -123,8 +125,35 @@ def cluster_to_box(cluster, det_id):
     }
 
 
-def detect_objects_from_points(points, eps=0.6, min_points=20):
+def cluster_to_oriented_box(cluster, det_id):
+    x_min, y_min = cluster[:, 0].min(), cluster[:, 1].min()
+    x_max, y_max = cluster[:, 0].max(), cluster[:, 1].max()
+    z_min, z_max = cluster[:, 2].min(), cluster[:, 2].max()
+    x, y, length, width, yaw = estimate_oriented_box_xy(cluster)
+    num_points = int(len(cluster))
+    axis_length = float(max(x_max - x_min, 0.1))
+    axis_width = float(max(y_max - y_min, 0.1))
+    class_name = classify_cluster(axis_length, axis_width, num_points)
+    score = min(0.99, 0.45 + 0.001 * num_points)
+
+    return {
+        "id": f"cluster_{det_id}",
+        "class_name": class_name,
+        "x": x,
+        "y": y,
+        "z": float((z_min + z_max) / 2.0),
+        "length": length,
+        "width": width,
+        "yaw": yaw,
+        "score": float(score),
+        "num_points": num_points,
+        "box_type": "oriented_pca",
+    }
+
+
+def detect_objects_from_points(points, eps=0.6, min_points=20, oriented=False):
     obstacle_points = filter_obstacle_points(points)
     clusters = euclidean_cluster(obstacle_points, eps=eps, min_points=min_points)
-    detections = [cluster_to_box(cluster, idx + 1) for idx, cluster in enumerate(clusters)]
+    box_fn = cluster_to_oriented_box if oriented else cluster_to_box
+    detections = [box_fn(cluster, idx + 1) for idx, cluster in enumerate(clusters)]
     return detections

@@ -22,6 +22,7 @@ def parse_args():
     parser.add_argument("--min-points", type=int, default=20, help="Minimum points for a valid cluster.")
     parser.add_argument("--nms-iou-threshold", type=float, default=0.3, help="BEV NMS IoU threshold.")
     parser.add_argument("--eval-iou-threshold", type=float, default=0.25, help="BEV IoU threshold for TP matching.")
+    parser.add_argument("--oriented", action="store_true", help="Use PCA-oriented clustering boxes.")
     return parser.parse_args()
 
 
@@ -42,7 +43,12 @@ if __name__ == "__main__":
         print("Expected layout: data/kitti/training/{velodyne,label_2,calib}/000000.*")
         raise SystemExit(1)
 
-    raw_detections = detect_objects_from_points(points, eps=args.eps, min_points=args.min_points)
+    raw_detections = detect_objects_from_points(
+        points,
+        eps=args.eps,
+        min_points=args.min_points,
+        oriented=args.oriented,
+    )
     detections = nms_bev(raw_detections, iou_threshold=args.nms_iou_threshold)
     gt_boxes = kitti_labels_to_lidar_boxes(labels, calib)
     evaluation = evaluate_detections(detections, gt_boxes, iou_threshold=args.eval_iou_threshold)
@@ -55,10 +61,12 @@ if __name__ == "__main__":
         "num_gt_boxes": len(gt_boxes),
         "num_raw_detections": len(raw_detections),
         "num_detections_after_nms": len(detections),
+        "box_mode": "oriented_pca" if args.oriented else "axis_aligned",
         **evaluation,
     }
 
-    output_path = report_dir / f"kitti_eval_{frame_id}.json"
+    suffix = "oriented" if args.oriented else "axis_aligned"
+    output_path = report_dir / f"kitti_eval_{frame_id}_{suffix}.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
 
@@ -66,6 +74,7 @@ if __name__ == "__main__":
     print(f"loaded points: {len(points)}")
     print(f"gt boxes in lidar frame: {len(gt_boxes)}")
     print(f"detections after nms: {len(detections)}")
+    print(f'box mode: {report["box_mode"]}')
     print(f'eval iou threshold: {report["iou_threshold"]:.2f}')
     print(f'tp={metrics["tp"]} fp={metrics["fp"]} fn={metrics["fn"]}')
     print(f'precision={metrics["precision"]:.3f} recall={metrics["recall"]:.3f}')
