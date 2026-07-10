@@ -14,6 +14,12 @@ def resolve_kitti_paths(data_root, frame_id):
     return velodyne_path, label_path
 
 
+def resolve_kitti_calib_path(data_root, frame_id):
+    data_root = Path(data_root)
+    frame_id = str(frame_id).zfill(6)
+    return data_root / "training" / "calib" / f"{frame_id}.txt"
+
+
 def load_kitti_point_cloud(bin_path):
     bin_path = Path(bin_path)
     if not bin_path.exists():

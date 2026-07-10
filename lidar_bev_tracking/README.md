@@ -16,6 +16,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Maintain track ids and visualize trajectories.
 - Detect objects directly from point clouds with a simple clustering baseline.
 - Load KITTI Object Detection LiDAR `.bin` files and run the clustering detector on real point clouds.
+- Parse KITTI calibration files and overlay LiDAR-frame GT boxes with detections in BEV.
 
 ## Quick Start
 
@@ -30,6 +31,7 @@ PYTHONPATH=src python scripts/run_tracking_demo.py
 PYTHONPATH=src python scripts/run_clustering_detection_demo.py
 PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 ```
 
 ## Outputs
@@ -42,6 +44,7 @@ outputs/figures/tracking_frame_000000.png
 outputs/figures/tracking_frame_000007.png
 outputs/figures/clustering_detection.png
 outputs/figures/kitti_clustering_000000.png
+outputs/figures/kitti_gt_overlay_000000.png
 ```
 
 ## KITTI Data Layout
@@ -55,18 +58,21 @@ data/kitti/
       000000.bin
     label_2/
       000000.txt
+    calib/
+      000000.txt
 ```
 
-`velodyne/*.bin` is required for the KITTI demo. `label_2/*.txt` is optional and is parsed for later evaluation/visualization work.
+`velodyne/*.bin` is required for the KITTI clustering demo. `label_2/*.txt` and `calib/*.txt` are required for GT overlay because KITTI labels are stored in camera coordinates and must be converted into the LiDAR frame before BEV visualization.
 
 For a tiny smoke test without downloading KITTI, generate a synthetic KITTI-layout frame:
 
 ```bash
 PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 ```
 
-This only validates the file layout and reader path; it is not a real KITTI benchmark result.
+This only validates the file layout, reader path, simplified calibration parsing, and GT overlay path; it is not a real KITTI benchmark result.
 
 ## Roadmap
 
