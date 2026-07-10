@@ -17,6 +17,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Detect objects directly from point clouds with a simple clustering baseline.
 - Load KITTI Object Detection LiDAR `.bin` files and run the clustering detector on real point clouds.
 - Parse KITTI calibration files and overlay LiDAR-frame GT boxes with detections in BEV.
+- Evaluate BEV detections with IoU matching, TP/FP/FN, precision, and recall.
 
 ## Quick Start
 
@@ -32,6 +33,7 @@ PYTHONPATH=src python scripts/run_clustering_detection_demo.py
 PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
 ```
 
 ## Outputs
@@ -45,6 +47,7 @@ outputs/figures/tracking_frame_000007.png
 outputs/figures/clustering_detection.png
 outputs/figures/kitti_clustering_000000.png
 outputs/figures/kitti_gt_overlay_000000.png
+outputs/reports/kitti_eval_000000.json
 ```
 
 ## KITTI Data Layout
@@ -70,13 +73,13 @@ For a tiny smoke test without downloading KITTI, generate a synthetic KITTI-layo
 PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
+PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
 ```
 
-This only validates the file layout, reader path, simplified calibration parsing, and GT overlay path; it is not a real KITTI benchmark result.
+This only validates the file layout, reader path, simplified calibration parsing, GT overlay path, and BEV evaluation flow; it is not a real KITTI benchmark result.
 
 ## Roadmap
 
-- Add BEV detection metrics.
 - Add Kalman Filter prediction.
 - Add Hungarian matching.
 - Replace axis-aligned cluster boxes with PCA-oriented boxes.
