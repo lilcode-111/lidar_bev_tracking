@@ -1,0 +1,17 @@
+data:
+  root: data/kitti
+  frame_id: "000000"
+
+detector:
+  eps: 0.6
+  min_points: 20
+  oriented: true
+
+nms:
+  iou_threshold: 0.3
+
+evaluation:
+  iou_threshold: 0.25
+
+outputs:
+  report_dir: outputs/reports

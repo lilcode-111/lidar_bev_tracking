@@ -1,17 +1,6 @@
 import argparse
-import json
-from pathlib import Path
 
-from bev_tracking.clustering_detector import detect_objects_from_points
-from bev_tracking.evaluation import evaluate_detections
-from bev_tracking.kitti import (
-    load_kitti_labels,
-    load_kitti_point_cloud,
-    resolve_kitti_calib_path,
-    resolve_kitti_paths,
-)
-from bev_tracking.kitti_calib import kitti_labels_to_lidar_boxes, load_kitti_calib
-from bev_tracking.nms import nms_bev
+from bev_tracking.pipeline import format_eval_summary, run_kitti_bev_evaluation
 
 
 def parse_args():
@@ -28,54 +17,19 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    report_dir = Path("outputs/reports")
-    report_dir.mkdir(parents=True, exist_ok=True)
-
-    velodyne_path, label_path = resolve_kitti_paths(args.data_root, args.frame_id)
-    calib_path = resolve_kitti_calib_path(args.data_root, args.frame_id)
-
     try:
-        points = load_kitti_point_cloud(velodyne_path)
-        labels = load_kitti_labels(label_path)
-        calib = load_kitti_calib(calib_path)
+        report, output_path = run_kitti_bev_evaluation(
+            data_root=args.data_root,
+            frame_id=args.frame_id,
+            eps=args.eps,
+            min_points=args.min_points,
+            oriented=args.oriented,
+            nms_iou_threshold=args.nms_iou_threshold,
+            eval_iou_threshold=args.eval_iou_threshold,
+        )
     except FileNotFoundError as exc:
         print(exc)
         print("Expected layout: data/kitti/training/{velodyne,label_2,calib}/000000.*")
         raise SystemExit(1)
 
-    raw_detections = detect_objects_from_points(
-        points,
-        eps=args.eps,
-        min_points=args.min_points,
-        oriented=args.oriented,
-    )
-    detections = nms_bev(raw_detections, iou_threshold=args.nms_iou_threshold)
-    gt_boxes = kitti_labels_to_lidar_boxes(labels, calib)
-    evaluation = evaluate_detections(detections, gt_boxes, iou_threshold=args.eval_iou_threshold)
-
-    frame_id = str(args.frame_id).zfill(6)
-    report = {
-        "frame_id": frame_id,
-        "num_points": len(points),
-        "num_labels": len(labels),
-        "num_gt_boxes": len(gt_boxes),
-        "num_raw_detections": len(raw_detections),
-        "num_detections_after_nms": len(detections),
-        "box_mode": "oriented_pca" if args.oriented else "axis_aligned",
-        **evaluation,
-    }
-
-    suffix = "oriented" if args.oriented else "axis_aligned"
-    output_path = report_dir / f"kitti_eval_{frame_id}_{suffix}.json"
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
-
-    metrics = report["metrics"]
-    print(f"loaded points: {len(points)}")
-    print(f"gt boxes in lidar frame: {len(gt_boxes)}")
-    print(f"detections after nms: {len(detections)}")
-    print(f'box mode: {report["box_mode"]}')
-    print(f'eval iou threshold: {report["iou_threshold"]:.2f}')
-    print(f'tp={metrics["tp"]} fp={metrics["fp"]} fn={metrics["fn"]}')
-    print(f'precision={metrics["precision"]:.3f} recall={metrics["recall"]:.3f}')
-    print(f"saved {output_path}")
+    print(format_eval_summary(report, output_path))

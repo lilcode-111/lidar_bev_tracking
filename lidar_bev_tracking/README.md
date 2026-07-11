@@ -19,6 +19,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Parse KITTI calibration files and overlay LiDAR-frame GT boxes with detections in BEV.
 - Evaluate BEV detections with IoU matching, TP/FP/FN, precision, and recall.
 - Estimate PCA-oriented boxes for clustering-based LiDAR detections.
+- Run KITTI BEV evaluation from YAML configs for reproducible experiments.
 
 ## Quick Start
 
@@ -37,6 +38,7 @@ PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriented
+PYTHONPATH=src python scripts/run_kitti_eval_from_config.py --config configs/kitti_eval.yaml
 ```
 
 ## Outputs
@@ -80,6 +82,7 @@ PYTHONPATH=src python scripts/run_kitti_clustering_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriented
+PYTHONPATH=src python scripts/run_kitti_eval_from_config.py --config configs/kitti_eval.yaml
 ```
 
 This only validates the file layout, reader path, simplified calibration parsing, GT overlay path, and BEV evaluation flow; it is not a real KITTI benchmark result.
