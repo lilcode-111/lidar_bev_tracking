@@ -20,6 +20,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Evaluate BEV detections with IoU matching, TP/FP/FN, precision, and recall.
 - Estimate PCA-oriented boxes for clustering-based LiDAR detections.
 - Run KITTI BEV evaluation from YAML configs for reproducible experiments.
+- Run multi-frame KITTI BEV batch evaluation and export summary JSON plus per-frame CSV.
 
 ## Quick Start
 
@@ -39,6 +40,8 @@ PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriented
 PYTHONPATH=src python scripts/run_kitti_eval_from_config.py --config configs/kitti_eval.yaml
+PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000 --num-frames 5
+PYTHONPATH=src python scripts/run_kitti_batch_eval_from_config.py --config configs/kitti_eval_batch.yaml
 ```
 
 ## Outputs
@@ -55,6 +58,8 @@ outputs/figures/kitti_clustering_000000.png
 outputs/figures/kitti_gt_overlay_000000.png
 outputs/reports/kitti_eval_000000_axis_aligned.json
 outputs/reports/kitti_eval_000000_oriented.json
+outputs/reports/kitti_batch_eval_oriented.json
+outputs/reports/kitti_batch_eval_frames_oriented.csv
 ```
 
 ## KITTI Data Layout
@@ -83,6 +88,8 @@ PYTHONPATH=src python scripts/run_kitti_gt_overlay_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000
 PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriented
 PYTHONPATH=src python scripts/run_kitti_eval_from_config.py --config configs/kitti_eval.yaml
+PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000 --num-frames 5
+PYTHONPATH=src python scripts/run_kitti_batch_eval_from_config.py --config configs/kitti_eval_batch.yaml
 ```
 
 This only validates the file layout, reader path, simplified calibration parsing, GT overlay path, and BEV evaluation flow; it is not a real KITTI benchmark result.

@@ -6,6 +6,11 @@
   "num_raw_detections": 4,
   "num_detections_after_nms": 4,
   "box_mode": "oriented_pca",
+  "parameters": {
+    "eps": 0.6,
+    "min_points": 20,
+    "nms_iou_threshold": 0.3
+  },
   "iou_threshold": 0.25,
   "metrics": {
     "tp": 3,

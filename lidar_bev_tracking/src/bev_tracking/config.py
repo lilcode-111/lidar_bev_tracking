@@ -10,6 +10,7 @@ DEFAULT_KITTI_EVAL_CONFIG = {
     "data": {
         "root": "data/kitti",
         "frame_id": "000000",
+        "frame_ids": ["000000"],
     },
     "detector": {
         "eps": 0.6,
@@ -55,6 +56,7 @@ def merge_dicts(base, override):
 def parse_simple_yaml(text):
     result = {}
     current_section = None
+    current_list_key = None
 
     for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].rstrip()
@@ -64,13 +66,23 @@ def parse_simple_yaml(text):
         if not line.startswith(" ") and line.endswith(":"):
             current_section = line[:-1].strip()
             result[current_section] = {}
+            current_list_key = None
             continue
 
         if current_section is None or ":" not in line:
+            if current_section is not None and current_list_key is not None and line.strip().startswith("- "):
+                result[current_section][current_list_key].append(parse_scalar(line.strip()[2:].strip()))
             continue
 
         key, value = line.strip().split(":", 1)
-        result[current_section][key.strip()] = parse_scalar(value.strip())
+        key = key.strip()
+        value = value.strip()
+        if value:
+            result[current_section][key] = parse_scalar(value)
+            current_list_key = None
+        else:
+            result[current_section][key] = []
+            current_list_key = key
 
     return result
 

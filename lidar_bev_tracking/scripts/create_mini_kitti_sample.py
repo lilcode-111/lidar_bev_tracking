@@ -51,14 +51,15 @@ Tr_velo_to_cam: 0 1 0 0 0 0 1 0 1 0 0 0
 def parse_args():
     parser = argparse.ArgumentParser(description="Create a tiny KITTI-layout smoke-test sample.")
     parser.add_argument("--data-root", default="data/kitti", help="Output KITTI root.")
-    parser.add_argument("--frame-id", default="000000", help="Frame id to write.")
+    parser.add_argument("--frame-id", default="000000", help="First frame id to write.")
+    parser.add_argument("--num-frames", type=int, default=1, help="Number of consecutive frames to write.")
     parser.add_argument("--seed", type=int, default=7, help="Synthetic sample seed.")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    frame_id = str(args.frame_id).zfill(6)
+    start_frame_id = int(args.frame_id)
     data_root = Path(args.data_root)
     velodyne_dir = data_root / "training" / "velodyne"
     label_dir = data_root / "training" / "label_2"
@@ -67,16 +68,20 @@ if __name__ == "__main__":
     label_dir.mkdir(parents=True, exist_ok=True)
     calib_dir.mkdir(parents=True, exist_ok=True)
 
-    points, objects = generate_frame(seed=args.seed)
-    bin_path = velodyne_dir / f"{frame_id}.bin"
-    label_path = label_dir / f"{frame_id}.txt"
-    calib_path = calib_dir / f"{frame_id}.txt"
+    for offset in range(args.num_frames):
+        frame_id = str(start_frame_id + offset).zfill(6)
+        points, objects = generate_frame(seed=args.seed + offset)
+        bin_path = velodyne_dir / f"{frame_id}.bin"
+        label_path = label_dir / f"{frame_id}.txt"
+        calib_path = calib_dir / f"{frame_id}.txt"
 
-    points.astype("float32").tofile(bin_path)
-    write_label_file(label_path, objects)
-    write_calib_file(calib_path)
+        points.astype("float32").tofile(bin_path)
+        write_label_file(label_path, objects)
+        write_calib_file(calib_path)
 
-    print(f"saved mini KITTI point cloud: {bin_path}")
-    print(f"saved mini KITTI labels: {label_path}")
-    print(f"saved mini KITTI calib: {calib_path}")
+        print(f"saved mini KITTI point cloud: {bin_path}")
+        print(f"saved mini KITTI labels: {label_path}")
+        print(f"saved mini KITTI calib: {calib_path}")
+
+    print(f"saved {args.num_frames} mini KITTI frame(s), starting from {str(start_frame_id).zfill(6)}")
     print("note: this is a synthetic smoke-test sample, not a real KITTI frame")
