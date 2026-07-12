@@ -122,6 +122,7 @@ def cluster_to_box(cluster, det_id):
         "yaw": 0.0,
         "score": float(score),
         "num_points": num_points,
+        "det_index": int(det_id - 1),
     }
 
 
@@ -148,6 +149,7 @@ def cluster_to_oriented_box(cluster, det_id):
         "score": float(score),
         "num_points": num_points,
         "box_type": "oriented_pca",
+        "det_index": int(det_id - 1),
     }
 
 

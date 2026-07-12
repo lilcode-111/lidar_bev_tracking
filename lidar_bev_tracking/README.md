@@ -21,6 +21,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Estimate PCA-oriented boxes for clustering-based LiDAR detections.
 - Run KITTI BEV evaluation from YAML configs for reproducible experiments.
 - Run multi-frame KITTI BEV batch evaluation and export summary JSON plus per-frame CSV.
+- Evaluate Car-only BEV detections with explicit positive/neutral/excluded policy, primary IoU=0.5, auxiliary IoU=0.25, and deterministic det_index ordering.
 
 ## Quick Start
 
@@ -42,6 +43,7 @@ PYTHONPATH=src python scripts/run_kitti_eval_demo.py --frame-id 000000 --oriente
 PYTHONPATH=src python scripts/run_kitti_eval_from_config.py --config configs/kitti_eval.yaml
 PYTHONPATH=src python scripts/create_mini_kitti_sample.py --frame-id 000000 --num-frames 5
 PYTHONPATH=src python scripts/run_kitti_batch_eval_from_config.py --config configs/kitti_eval_batch.yaml
+PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 ## Outputs
@@ -93,6 +95,21 @@ PYTHONPATH=src python scripts/run_kitti_batch_eval_from_config.py --config confi
 ```
 
 This only validates the file layout, reader path, simplified calibration parsing, GT overlay path, and BEV evaluation flow; it is not a real KITTI benchmark result.
+
+## Evaluation Policy
+
+The current evaluation policy is Car-only:
+
+```text
+positive GT: Car
+neutral GT: Van, Truck
+excluded GT: Pedestrian, Cyclist, Person_sitting, Tram, Misc
+ROI: x=[0,40), y=[-20,20)
+primary IoU: 0.5
+auxiliary IoU: 0.25
+```
+
+`DontCare` labels are preserved by the parser and counted in raw labels, but entries without valid 3D boxes are not converted into BEV GT boxes. Missing label files raise `FileNotFoundError`; empty label files are valid zero-GT frames.
 
 ## Roadmap
 

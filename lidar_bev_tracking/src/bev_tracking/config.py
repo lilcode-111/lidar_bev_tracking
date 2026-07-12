@@ -21,7 +21,8 @@ DEFAULT_KITTI_EVAL_CONFIG = {
         "iou_threshold": 0.3,
     },
     "evaluation": {
-        "iou_threshold": 0.25,
+        "iou_threshold": 0.5,
+        "auxiliary_iou_thresholds": [0.25],
     },
     "outputs": {
         "report_dir": "outputs/reports",

@@ -34,7 +34,10 @@ if __name__ == "__main__":
         print("Expected layout: data/kitti/training/velodyne/000000.bin")
         raise SystemExit(1)
 
-    labels = load_kitti_labels(label_path)
+    try:
+        labels = load_kitti_labels(label_path)
+    except FileNotFoundError:
+        labels = None
     raw_detections = detect_objects_from_points(points, eps=args.eps, min_points=args.min_points)
     detections = nms_bev(raw_detections, iou_threshold=args.iou_threshold)
 
@@ -46,7 +49,7 @@ if __name__ == "__main__":
     cv2.imwrite(str(output_path), image)
 
     print(f"loaded points: {len(points)}")
-    print(f"loaded labels: {len(labels)}")
+    print(f"loaded labels: {len(labels) if labels is not None else 'missing'}")
     print(f"raw detections: {len(raw_detections)}")
     print(f"detections after nms: {len(detections)}")
     print(f"saved {output_path}")

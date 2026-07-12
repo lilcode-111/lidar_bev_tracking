@@ -20,7 +20,8 @@ def run_kitti_bev_evaluation(
     min_points=20,
     oriented=False,
     nms_iou_threshold=0.3,
-    eval_iou_threshold=0.25,
+    eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
     report_dir="outputs/reports",
 ):
     velodyne_path, label_path = resolve_kitti_paths(data_root, frame_id)
@@ -38,7 +39,12 @@ def run_kitti_bev_evaluation(
     )
     detections = nms_bev(raw_detections, iou_threshold=nms_iou_threshold)
     gt_boxes = kitti_labels_to_lidar_boxes(labels, calib)
-    evaluation = evaluate_detections(detections, gt_boxes, iou_threshold=eval_iou_threshold)
+    evaluation = evaluate_detections(
+        detections,
+        gt_boxes,
+        iou_threshold=eval_iou_threshold,
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+    )
 
     frame_id = str(frame_id).zfill(6)
     report = {
@@ -53,6 +59,8 @@ def run_kitti_bev_evaluation(
             "eps": float(eps),
             "min_points": int(min_points),
             "nms_iou_threshold": float(nms_iou_threshold),
+            "eval_iou_threshold": float(eval_iou_threshold),
+            "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
         },
         **evaluation,
     }
@@ -72,6 +80,7 @@ def run_kitti_bev_evaluation_from_config(config):
         oriented=config["detector"]["oriented"],
         nms_iou_threshold=config["nms"]["iou_threshold"],
         eval_iou_threshold=config["evaluation"]["iou_threshold"],
+        auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
         report_dir=config["outputs"]["report_dir"],
     )
 
@@ -85,6 +94,8 @@ def save_json_report(report, output_path):
 
 def format_eval_summary(report, output_path):
     metrics = report["metrics"]
+    precision = format_metric(metrics["precision"])
+    recall = format_metric(metrics["recall"])
     return "\n".join(
         [
             f'loaded points: {report["num_points"]}',
@@ -93,7 +104,13 @@ def format_eval_summary(report, output_path):
             f'box mode: {report["box_mode"]}',
             f'eval iou threshold: {report["iou_threshold"]:.2f}',
             f'tp={metrics["tp"]} fp={metrics["fp"]} fn={metrics["fn"]}',
-            f'precision={metrics["precision"]:.3f} recall={metrics["recall"]:.3f}',
+            f"precision={precision} recall={recall}",
             f"saved {output_path}",
         ]
     )
+
+
+def format_metric(value):
+    if value is None:
+        return "undefined"
+    return f"{value:.3f}"

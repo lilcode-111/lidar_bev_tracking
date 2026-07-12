@@ -1,7 +1,9 @@
 import csv
 from pathlib import Path
 
+from bev_tracking.eval_policy import safe_divide
 from bev_tracking.pipeline import run_kitti_bev_evaluation, save_json_report
+from bev_tracking.pipeline import format_metric
 
 
 def run_kitti_batch_evaluation(
@@ -11,7 +13,8 @@ def run_kitti_batch_evaluation(
     min_points=20,
     oriented=False,
     nms_iou_threshold=0.3,
-    eval_iou_threshold=0.25,
+    eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
     report_dir="outputs/reports",
 ):
     frame_ids = normalize_frame_ids(frame_ids)
@@ -26,6 +29,7 @@ def run_kitti_batch_evaluation(
             oriented=oriented,
             nms_iou_threshold=nms_iou_threshold,
             eval_iou_threshold=eval_iou_threshold,
+            auxiliary_iou_thresholds=auxiliary_iou_thresholds,
             report_dir=report_dir,
         )
         report["report_path"] = str(output_path)
@@ -39,6 +43,7 @@ def run_kitti_batch_evaluation(
         oriented=oriented,
         nms_iou_threshold=nms_iou_threshold,
         eval_iou_threshold=eval_iou_threshold,
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
     )
 
     suffix = "oriented" if oriented else "axis_aligned"
@@ -61,6 +66,7 @@ def run_kitti_batch_evaluation_from_config(config):
         oriented=config["detector"]["oriented"],
         nms_iou_threshold=config["nms"]["iou_threshold"],
         eval_iou_threshold=config["evaluation"]["iou_threshold"],
+        auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
         report_dir=config["outputs"]["report_dir"],
     )
 
@@ -81,6 +87,7 @@ def summarize_batch_reports(
     oriented,
     nms_iou_threshold,
     eval_iou_threshold,
+    auxiliary_iou_thresholds,
 ):
     total_tp = 0
     total_fp = 0
@@ -109,11 +116,11 @@ def summarize_batch_reports(
         tp = class_metrics["tp"]
         fp = class_metrics["fp"]
         fn = class_metrics["fn"]
-        class_metrics["precision"] = tp / (tp + fp) if tp + fp > 0 else 0.0
-        class_metrics["recall"] = tp / (tp + fn) if tp + fn > 0 else 0.0
+        class_metrics["precision"] = safe_divide(tp, tp + fp)
+        class_metrics["recall"] = safe_divide(tp, tp + fn)
 
-    precision = total_tp / (total_tp + total_fp) if total_tp + total_fp > 0 else 0.0
-    recall = total_tp / (total_tp + total_fn) if total_tp + total_fn > 0 else 0.0
+    precision = safe_divide(total_tp, total_tp + total_fp)
+    recall = safe_divide(total_tp, total_tp + total_fn)
 
     return {
         "num_frames": len(frame_reports),
@@ -125,6 +132,7 @@ def summarize_batch_reports(
             "min_points": int(min_points),
             "nms_iou_threshold": float(nms_iou_threshold),
             "eval_iou_threshold": float(eval_iou_threshold),
+            "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
         },
         "totals": {
             "num_points": int(total_points),
@@ -133,8 +141,8 @@ def summarize_batch_reports(
             "tp": int(total_tp),
             "fp": int(total_fp),
             "fn": int(total_fn),
-            "precision": float(precision),
-            "recall": float(recall),
+            "precision": precision,
+            "recall": recall,
             "per_class": dict(sorted(per_class.items())),
         },
         "frames": [
@@ -181,8 +189,8 @@ def save_frame_csv(frame_reports, csv_path):
                     "tp": metrics["tp"],
                     "fp": metrics["fp"],
                     "fn": metrics["fn"],
-                    "precision": f'{metrics["precision"]:.6f}',
-                    "recall": f'{metrics["recall"]:.6f}',
+                    "precision": csv_metric(metrics["precision"]),
+                    "recall": csv_metric(metrics["recall"]),
                     "report_path": report["report_path"],
                 }
             )
@@ -190,6 +198,8 @@ def save_frame_csv(frame_reports, csv_path):
 
 def format_batch_summary(summary, summary_path, csv_path):
     totals = summary["totals"]
+    precision = format_metric(totals["precision"])
+    recall = format_metric(totals["recall"])
     return "\n".join(
         [
             f'frames: {summary["num_frames"]}',
@@ -198,8 +208,14 @@ def format_batch_summary(summary, summary_path, csv_path):
             f'total gt boxes: {totals["num_gt_boxes"]}',
             f'total detections after nms: {totals["num_detections_after_nms"]}',
             f'tp={totals["tp"]} fp={totals["fp"]} fn={totals["fn"]}',
-            f'precision={totals["precision"]:.3f} recall={totals["recall"]:.3f}',
+            f"precision={precision} recall={recall}",
             f"saved {summary_path}",
             f"saved {csv_path}",
         ]
     )
+
+
+def csv_metric(value):
+    if value is None:
+        return ""
+    return f"{value:.6f}"

@@ -1,8 +1,9 @@
 from bev_tracking.geometry import bev_iou
+from bev_tracking.eval_policy import assign_det_indices, detection_sort_key
 
 
 def nms_bev(boxes, iou_threshold=0.3):
-    sorted_boxes = sorted(boxes, key=lambda box: box.get("score", 0.0), reverse=True)
+    sorted_boxes = sorted(assign_det_indices(boxes), key=detection_sort_key)
     keep = []
 
     while sorted_boxes:

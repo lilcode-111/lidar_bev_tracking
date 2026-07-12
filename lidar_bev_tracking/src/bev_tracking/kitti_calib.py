@@ -57,11 +57,18 @@ def transform_points(points, transform):
     return (points_h @ transform.T)[:, :3]
 
 
+def has_valid_3d_box(label):
+    return label["height"] > 0.0 and label["width"] > 0.0 and label["length"] > 0.0
+
+
 def kitti_labels_to_lidar_boxes(labels, calib):
     cam_to_lidar = camera_rect_to_lidar_matrix(calib)
     boxes = []
 
     for idx, label in enumerate(labels, start=1):
+        if not has_valid_3d_box(label):
+            continue
+
         height = label["height"]
         width = label["width"]
         length = label["length"]

@@ -7,6 +7,7 @@ def make_noisy_predictions(objects):
     for obj in objects:
         base = copy.deepcopy(obj)
         base["score"] = 0.92 if obj["class_name"] == "car" else 0.84
+        base["det_index"] = len(predictions)
         predictions.append(base)
 
         duplicate = copy.deepcopy(obj)
@@ -15,6 +16,7 @@ def make_noisy_predictions(objects):
         duplicate["y"] -= 0.18
         duplicate["yaw"] += 0.04
         duplicate["score"] = 0.68
+        duplicate["det_index"] = len(predictions)
         predictions.append(duplicate)
 
     predictions.append(
@@ -28,6 +30,7 @@ def make_noisy_predictions(objects):
             "width": 1.9,
             "yaw": -0.1,
             "score": 0.42,
+            "det_index": len(predictions),
         }
     )
 

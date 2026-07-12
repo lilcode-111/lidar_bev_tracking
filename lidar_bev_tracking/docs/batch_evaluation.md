@@ -92,7 +92,9 @@ nms:
   iou_threshold: 0.3
 
 evaluation:
-  iou_threshold: 0.25
+  iou_threshold: 0.5
+  auxiliary_iou_thresholds:
+    - 0.25
 ```
 
 ## 运行批量评测
@@ -110,8 +112,8 @@ box mode: oriented_pca
 total points: 41200
 total gt boxes: 15
 total detections after nms: 20
-tp=15 fp=5 fn=0
-precision=0.750 recall=1.000
+tp=10 fp=0 fn=0
+precision=1.000 recall=1.000
 saved outputs/reports/kitti_batch_eval_oriented.json
 saved outputs/reports/kitti_batch_eval_frames_oriented.csv
 ```

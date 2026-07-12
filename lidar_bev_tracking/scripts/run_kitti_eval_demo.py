@@ -10,7 +10,7 @@ def parse_args():
     parser.add_argument("--eps", type=float, default=0.6, help="Euclidean clustering radius in meters.")
     parser.add_argument("--min-points", type=int, default=20, help="Minimum points for a valid cluster.")
     parser.add_argument("--nms-iou-threshold", type=float, default=0.3, help="BEV NMS IoU threshold.")
-    parser.add_argument("--eval-iou-threshold", type=float, default=0.25, help="BEV IoU threshold for TP matching.")
+    parser.add_argument("--eval-iou-threshold", type=float, default=0.5, help="Primary BEV IoU threshold for TP matching.")
     parser.add_argument("--oriented", action="store_true", help="Use PCA-oriented clustering boxes.")
     return parser.parse_args()
 
