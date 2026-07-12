@@ -1,0 +1,11 @@
+{
+  "include": [
+    "src",
+    "scripts"
+  ],
+  "extraPaths": [
+    "src"
+  ],
+  "venvPath": "/home/qingtao/miniconda3/envs",
+  "venv": "ad-perception"
+}

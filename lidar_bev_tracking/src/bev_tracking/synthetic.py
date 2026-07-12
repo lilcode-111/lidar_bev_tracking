@@ -1,4 +1,5 @@
 import json
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +29,11 @@ def sample_points_for_box(obj, num_points, rng):
 def generate_frame(seed=7):
     rng = np.random.default_rng(seed)
     objects = make_objects()
+    points = generate_points(objects, rng)
+    return points, objects
 
+
+def generate_points(objects, rng):
     background = np.column_stack(
         [
             rng.uniform(0, 40, 6000),
@@ -44,7 +49,39 @@ def generate_frame(seed=7):
         object_points.append(sample_points_for_box(obj, n, rng))
 
     points = np.vstack([background, *object_points]).astype(np.float32)
-    return points, objects
+    return points
+
+
+OBJECT_VELOCITIES = {
+    1: (0.70, 0.05),
+    2: (-0.25, 0.12),
+    3: (0.18, -0.04),
+    4: (0.00, 0.00),
+}
+
+
+def move_objects(objects, frame_idx):
+    moved = []
+    for obj in objects:
+        new_obj = copy.deepcopy(obj)
+        vx, vy = OBJECT_VELOCITIES.get(obj["id"], (0.0, 0.0))
+        new_obj["x"] += vx * frame_idx
+        new_obj["y"] += vy * frame_idx
+        moved.append(new_obj)
+    return moved
+
+
+def generate_sequence(num_frames=8, seed=11):
+    base_objects = make_objects()
+    frames = []
+
+    for frame_idx in range(num_frames):
+        rng = np.random.default_rng(seed + frame_idx)
+        objects = move_objects(base_objects, frame_idx)
+        points = generate_points(objects, rng)
+        frames.append({"frame_id": f"{frame_idx:06d}", "points": points, "objects": objects})
+
+    return frames
 
 
 def save_sample(output_dir):

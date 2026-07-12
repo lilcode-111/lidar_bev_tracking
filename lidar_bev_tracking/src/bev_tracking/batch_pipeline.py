@@ -1,0 +1,305 @@
+import csv
+from pathlib import Path
+
+from bev_tracking.eval_policy import safe_divide, safe_f1
+from bev_tracking.pipeline import run_kitti_bev_evaluation, save_json_report
+from bev_tracking.pipeline import format_metric
+
+
+def run_kitti_batch_evaluation(
+    data_root="data/kitti",
+    frame_ids=None,
+    eps=0.6,
+    min_points=20,
+    oriented=False,
+    nms_iou_threshold=0.3,
+    eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
+    report_dir="outputs/reports",
+):
+    frame_ids = normalize_frame_ids(frame_ids)
+    frame_reports = []
+
+    for frame_id in frame_ids:
+        report, output_path = run_kitti_bev_evaluation(
+            data_root=data_root,
+            frame_id=frame_id,
+            eps=eps,
+            min_points=min_points,
+            oriented=oriented,
+            nms_iou_threshold=nms_iou_threshold,
+            eval_iou_threshold=eval_iou_threshold,
+            auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+            report_dir=report_dir,
+        )
+        report["report_path"] = str(output_path)
+        frame_reports.append(report)
+
+    summary = summarize_batch_reports(
+        frame_reports=frame_reports,
+        data_root=data_root,
+        eps=eps,
+        min_points=min_points,
+        oriented=oriented,
+        nms_iou_threshold=nms_iou_threshold,
+        eval_iou_threshold=eval_iou_threshold,
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+    )
+
+    suffix = "oriented" if oriented else "axis_aligned"
+    report_dir = Path(report_dir)
+    summary_path = report_dir / f"kitti_batch_eval_{suffix}.json"
+    csv_path = report_dir / f"kitti_batch_eval_frames_{suffix}.csv"
+    save_json_report(summary, summary_path)
+    save_frame_csv(frame_reports, csv_path)
+    return summary, summary_path, csv_path
+
+
+def run_kitti_batch_evaluation_from_config(config):
+    data_config = config["data"]
+    frame_ids = data_config.get("frame_ids") or [data_config["frame_id"]]
+    return run_kitti_batch_evaluation(
+        data_root=data_config["root"],
+        frame_ids=frame_ids,
+        eps=config["detector"]["eps"],
+        min_points=config["detector"]["min_points"],
+        oriented=config["detector"]["oriented"],
+        nms_iou_threshold=config["nms"]["iou_threshold"],
+        eval_iou_threshold=config["evaluation"]["iou_threshold"],
+        auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
+        report_dir=config["outputs"]["report_dir"],
+    )
+
+
+def normalize_frame_ids(frame_ids):
+    if frame_ids is None:
+        return ["000000"]
+    if isinstance(frame_ids, str):
+        frame_ids = [frame_ids]
+    return [str(frame_id).zfill(6) for frame_id in frame_ids]
+
+
+def summarize_batch_reports(
+    frame_reports,
+    data_root,
+    eps,
+    min_points,
+    oriented,
+    nms_iou_threshold,
+    eval_iou_threshold,
+    auxiliary_iou_thresholds,
+):
+    total_points = 0
+    total_gt_boxes = 0
+    total_detections = 0
+    iou_keys = metric_keys(eval_iou_threshold, auxiliary_iou_thresholds)
+
+    for report in frame_reports:
+        total_points += report["num_points"]
+        total_gt_boxes += report["num_gt_boxes"]
+        total_detections += report["num_detections_after_nms"]
+
+    metrics_by_iou = {}
+    for iou_key in iou_keys:
+        frame_metrics = [get_report_metrics_for_iou(report, iou_key) for report in frame_reports]
+        metrics_by_iou[iou_key] = aggregate_metrics(frame_metrics)
+
+    primary_key = format_iou_key(eval_iou_threshold)
+    primary_metrics = metrics_by_iou[primary_key]
+
+    return {
+        "num_frames": len(frame_reports),
+        "frame_ids": [report["frame_id"] for report in frame_reports],
+        "data_root": data_root,
+        "box_mode": "oriented_pca" if oriented else "axis_aligned",
+        "parameters": {
+            "eps": float(eps),
+            "min_points": int(min_points),
+            "nms_iou_threshold": float(nms_iou_threshold),
+            "eval_iou_threshold": float(eval_iou_threshold),
+            "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
+        },
+        "metrics_by_iou": metrics_by_iou,
+        "totals": {
+            "num_points": int(total_points),
+            "num_gt_boxes": int(total_gt_boxes),
+            "num_detections_after_nms": int(total_detections),
+            "tp": primary_metrics["tp"],
+            "fp": primary_metrics["fp"],
+            "fn": primary_metrics["fn"],
+            "precision": primary_metrics["precision"],
+            "recall": primary_metrics["recall"],
+            "f1": primary_metrics["f1"],
+            "per_class": primary_metrics["per_class"],
+        },
+        "frames": [
+            {
+                "frame_id": report["frame_id"],
+                "num_points": report["num_points"],
+                "num_gt_boxes": report["num_gt_boxes"],
+                "num_detections_after_nms": report["num_detections_after_nms"],
+                "metrics": report["metrics"],
+                "metrics_by_iou": collect_report_metrics_by_iou(report, iou_keys),
+                "report_path": report["report_path"],
+            }
+            for report in frame_reports
+        ],
+    }
+
+
+def metric_keys(eval_iou_threshold, auxiliary_iou_thresholds):
+    keys = [format_iou_key(eval_iou_threshold)]
+    for threshold in auxiliary_iou_thresholds:
+        key = format_iou_key(threshold)
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+def format_iou_key(threshold):
+    return f"{float(threshold):.2f}"
+
+
+def iou_suffix(iou_key):
+    return f'iou_{iou_key.replace(".", "_")}'
+
+
+def get_report_metrics_for_iou(report, iou_key):
+    if iou_key == format_iou_key(report["iou_threshold"]):
+        return report["metrics"]
+    return report["auxiliary"][iou_key]["metrics"]
+
+
+def collect_report_metrics_by_iou(report, iou_keys):
+    return {iou_key: get_report_metrics_for_iou(report, iou_key) for iou_key in iou_keys}
+
+
+def aggregate_metrics(metrics_list):
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+    per_class = {}
+
+    for metrics in metrics_list:
+        total_tp += metrics["tp"]
+        total_fp += metrics["fp"]
+        total_fn += metrics["fn"]
+
+        for class_name, class_metrics in metrics.get("per_class", {}).items():
+            target = per_class.setdefault(class_name, {"tp": 0, "fp": 0, "fn": 0})
+            target["tp"] += class_metrics["tp"]
+            target["fp"] += class_metrics["fp"]
+            target["fn"] += class_metrics["fn"]
+
+    for class_metrics in per_class.values():
+        tp = class_metrics["tp"]
+        fp = class_metrics["fp"]
+        fn = class_metrics["fn"]
+        class_metrics["precision"] = safe_divide(tp, tp + fp)
+        class_metrics["recall"] = safe_divide(tp, tp + fn)
+        class_metrics["f1"] = safe_f1(tp, fp, fn)
+
+    return {
+        "tp": int(total_tp),
+        "fp": int(total_fp),
+        "fn": int(total_fn),
+        "precision": safe_divide(total_tp, total_tp + total_fp),
+        "recall": safe_divide(total_tp, total_tp + total_fn),
+        "f1": safe_f1(total_tp, total_fp, total_fn),
+        "per_class": dict(sorted(per_class.items())),
+    }
+
+
+def save_frame_csv(frame_reports, csv_path):
+    csv_path = Path(csv_path)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    iou_keys = report_iou_keys(frame_reports)
+    metric_fieldnames = []
+    for iou_key in iou_keys:
+        suffix = iou_suffix(iou_key)
+        metric_fieldnames.extend(
+            [
+                f"tp_{suffix}",
+                f"fp_{suffix}",
+                f"fn_{suffix}",
+                f"precision_{suffix}",
+                f"recall_{suffix}",
+                f"f1_{suffix}",
+            ]
+        )
+
+    fieldnames = [
+        "frame_id",
+        "num_points",
+        "num_gt_boxes",
+        "num_detections_after_nms",
+        *metric_fieldnames,
+        "report_path",
+    ]
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for report in frame_reports:
+            row = {
+                "frame_id": report["frame_id"],
+                "num_points": report["num_points"],
+                "num_gt_boxes": report["num_gt_boxes"],
+                "num_detections_after_nms": report["num_detections_after_nms"],
+                "report_path": report["report_path"],
+            }
+            for iou_key in iou_keys:
+                metrics = get_report_metrics_for_iou(report, iou_key)
+                suffix = iou_suffix(iou_key)
+                row[f"tp_{suffix}"] = metrics["tp"]
+                row[f"fp_{suffix}"] = metrics["fp"]
+                row[f"fn_{suffix}"] = metrics["fn"]
+                row[f"precision_{suffix}"] = csv_metric(metrics["precision"])
+                row[f"recall_{suffix}"] = csv_metric(metrics["recall"])
+                row[f"f1_{suffix}"] = csv_metric(metrics["f1"])
+            writer.writerow(row)
+
+
+def report_iou_keys(frame_reports):
+    if not frame_reports:
+        return []
+    first = frame_reports[0]
+    return metric_keys(
+        first["iou_threshold"],
+        [float(key) for key in first.get("auxiliary", {}).keys()],
+    )
+
+
+def format_batch_summary(summary, summary_path, csv_path):
+    totals = summary["totals"]
+    precision = format_metric(totals["precision"])
+    recall = format_metric(totals["recall"])
+    f1 = format_metric(totals["f1"])
+    metric_lines = []
+    for iou_key, metrics in summary["metrics_by_iou"].items():
+        metric_lines.append(
+            f'iou={iou_key} tp={metrics["tp"]} fp={metrics["fp"]} fn={metrics["fn"]} '
+            f'precision={format_metric(metrics["precision"])} '
+            f'recall={format_metric(metrics["recall"])} '
+            f'f1={format_metric(metrics["f1"])}'
+        )
+    return "\n".join(
+        [
+            f'frames: {summary["num_frames"]}',
+            f'box mode: {summary["box_mode"]}',
+            f'total points: {totals["num_points"]}',
+            f'total gt boxes: {totals["num_gt_boxes"]}',
+            f'total detections after nms: {totals["num_detections_after_nms"]}',
+            f'tp={totals["tp"]} fp={totals["fp"]} fn={totals["fn"]}',
+            f"precision={precision} recall={recall} f1={f1}",
+            *metric_lines,
+            f"saved {summary_path}",
+            f"saved {csv_path}",
+        ]
+    )
+
+
+def csv_metric(value):
+    if value is None:
+        return ""
+    return f"{value:.6f}"

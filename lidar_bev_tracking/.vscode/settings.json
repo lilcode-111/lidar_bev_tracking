@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "/home/qingtao/miniconda3/envs/ad-perception/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": [
+    "/home/qingtao/projects/lidar_bev_tracking/src"
+  ],
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.useLibraryCodeForTypes": true
+}
