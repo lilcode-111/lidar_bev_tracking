@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from bev_tracking.eval_policy import (
     AUXILIARY_IOU_THRESHOLDS,
+    NEUTRAL_IOU_THRESHOLD,
     PRIMARY_IOU_THRESHOLD,
     assign_det_indices,
     classify_gt_box,
@@ -9,6 +10,7 @@ from bev_tracking.eval_policy import (
     is_positive_detection,
     normalize_class_name,
     safe_divide,
+    safe_f1,
 )
 from bev_tracking.geometry import bev_iou
 
@@ -19,9 +21,19 @@ def evaluate_detections(
     iou_threshold=PRIMARY_IOU_THRESHOLD,
     auxiliary_iou_thresholds=AUXILIARY_IOU_THRESHOLDS,
 ):
-    primary = evaluate_detections_at_iou(detections, gt_boxes, iou_threshold=iou_threshold)
+    primary = evaluate_detections_at_iou(
+        detections,
+        gt_boxes,
+        iou_threshold=iou_threshold,
+        neutral_iou_threshold=NEUTRAL_IOU_THRESHOLD,
+    )
     auxiliary = {
-        f"{threshold:.2f}": evaluate_detections_at_iou(detections, gt_boxes, iou_threshold=threshold)
+        f"{threshold:.2f}": evaluate_detections_at_iou(
+            detections,
+            gt_boxes,
+            iou_threshold=threshold,
+            neutral_iou_threshold=NEUTRAL_IOU_THRESHOLD,
+        )
         for threshold in auxiliary_iou_thresholds
     }
 
@@ -33,25 +45,33 @@ def evaluate_detections(
             "excluded_gt_classes": ["pedestrian", "cyclist", "person_sitting", "tram", "misc"],
             "positive_detection_classes": ["car"],
             "roi": {"x": [0.0, 40.0], "y": [-20.0, 20.0]},
+            "neutral_iou_threshold": NEUTRAL_IOU_THRESHOLD,
             "zero_denominator": "undefined_null",
         },
         "auxiliary": auxiliary,
     }
 
 
-def evaluate_detections_at_iou(detections, gt_boxes, iou_threshold=PRIMARY_IOU_THRESHOLD):
+def evaluate_detections_at_iou(
+    detections,
+    gt_boxes,
+    iou_threshold=PRIMARY_IOU_THRESHOLD,
+    neutral_iou_threshold=NEUTRAL_IOU_THRESHOLD,
+):
     prepared_detections = prepare_detections(detections)
     prepared_gt = prepare_gt_boxes(gt_boxes)
     matches, neutralized_detections, false_positives, false_negatives = match_policy_detections(
         prepared_detections,
         prepared_gt["positive"],
         prepared_gt["neutral"],
-        iou_threshold=iou_threshold,
+        positive_iou_threshold=iou_threshold,
+        neutral_iou_threshold=neutral_iou_threshold,
     )
     metrics = summarize_metrics(matches, false_positives, false_negatives)
 
     return {
         "iou_threshold": float(iou_threshold),
+        "neutral_iou_threshold": float(neutral_iou_threshold),
         "metrics": metrics,
         "matches": matches,
         "neutralized_detections": neutralized_detections,
@@ -124,7 +144,7 @@ def prepare_gt_boxes(gt_boxes):
     return {"positive": positive, "neutral": neutral, "ignored": ignored}
 
 
-def match_policy_detections(detections, positive_gt, neutral_gt, iou_threshold):
+def match_policy_detections(detections, positive_gt, neutral_gt, positive_iou_threshold, neutral_iou_threshold):
     matched_positive_gt = set()
     matched_neutral_gt = set()
     matches = []
@@ -133,7 +153,7 @@ def match_policy_detections(detections, positive_gt, neutral_gt, iou_threshold):
 
     for det in detections["positive"]:
         positive_idx, positive_iou = find_best_unmatched_iou(det, positive_gt, matched_positive_gt)
-        if positive_idx is not None and positive_iou >= iou_threshold:
+        if positive_idx is not None and positive_iou >= positive_iou_threshold:
             matched_positive_gt.add(positive_idx)
             gt = positive_gt[positive_idx]
             matches.append(
@@ -149,7 +169,7 @@ def match_policy_detections(detections, positive_gt, neutral_gt, iou_threshold):
             continue
 
         neutral_idx, neutral_iou = find_best_unmatched_iou(det, neutral_gt, matched_neutral_gt)
-        if neutral_idx is not None and neutral_iou >= iou_threshold:
+        if neutral_idx is not None and neutral_iou >= neutral_iou_threshold:
             matched_neutral_gt.add(neutral_idx)
             gt = neutral_gt[neutral_idx]
             neutralized_detections.append(
@@ -199,7 +219,7 @@ def find_best_unmatched_iou(det, gt_boxes, matched_gt):
 
 
 def _empty_class_metrics():
-    return {"tp": 0, "fp": 0, "fn": 0, "precision": None, "recall": None}
+    return {"tp": 0, "fp": 0, "fn": 0, "precision": None, "recall": None, "f1": None}
 
 
 def summarize_metrics(matches, false_positives, false_negatives):
@@ -208,6 +228,7 @@ def summarize_metrics(matches, false_positives, false_negatives):
     fn = len(false_negatives)
     precision = safe_divide(tp, tp + fp)
     recall = safe_divide(tp, tp + fn)
+    f1 = safe_f1(tp, fp, fn)
 
     per_class = defaultdict(_empty_class_metrics)
     for match in matches:
@@ -223,6 +244,7 @@ def summarize_metrics(matches, false_positives, false_negatives):
         class_fn = metrics["fn"]
         metrics["precision"] = safe_divide(class_tp, class_tp + class_fp)
         metrics["recall"] = safe_divide(class_tp, class_tp + class_fn)
+        metrics["f1"] = safe_f1(class_tp, class_fp, class_fn)
 
     return {
         "tp": tp,
@@ -230,5 +252,6 @@ def summarize_metrics(matches, false_positives, false_negatives):
         "fn": fn,
         "precision": precision,
         "recall": recall,
+        "f1": f1,
         "per_class": dict(sorted(per_class.items())),
     }

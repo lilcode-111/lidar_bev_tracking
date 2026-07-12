@@ -96,6 +96,7 @@ def format_eval_summary(report, output_path):
     metrics = report["metrics"]
     precision = format_metric(metrics["precision"])
     recall = format_metric(metrics["recall"])
+    f1 = format_metric(metrics["f1"])
     return "\n".join(
         [
             f'loaded points: {report["num_points"]}',
@@ -104,7 +105,7 @@ def format_eval_summary(report, output_path):
             f'box mode: {report["box_mode"]}',
             f'eval iou threshold: {report["iou_threshold"]:.2f}',
             f'tp={metrics["tp"]} fp={metrics["fp"]} fn={metrics["fn"]}',
-            f"precision={precision} recall={recall}",
+            f"precision={precision} recall={recall} f1={f1}",
             f"saved {output_path}",
         ]
     )

@@ -7,6 +7,7 @@ ROI_X_RANGE = (0.0, 40.0)
 ROI_Y_RANGE = (-20.0, 20.0)
 PRIMARY_IOU_THRESHOLD = 0.5
 AUXILIARY_IOU_THRESHOLDS = (0.25,)
+NEUTRAL_IOU_THRESHOLD = 0.5
 
 
 def normalize_class_name(class_name):
@@ -58,3 +59,10 @@ def safe_divide(numerator, denominator):
     if denominator == 0:
         return None
     return float(numerator / denominator)
+
+
+def safe_f1(tp, fp, fn):
+    denominator = 2 * tp + fp + fn
+    if denominator == 0:
+        return None
+    return float((2 * tp) / denominator)
