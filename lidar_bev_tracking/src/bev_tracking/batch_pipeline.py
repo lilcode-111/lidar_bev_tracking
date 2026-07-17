@@ -2,11 +2,11 @@ import csv
 from pathlib import Path
 
 from bev_tracking.eval_policy import safe_divide, safe_f1
-from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
+from bev_tracking.error_codes import BatchStatus, ErrorCode, ErrorStage, FrameStatus
 from bev_tracking.kitti import resolve_kitti_calib_path, resolve_kitti_paths
 from bev_tracking.pipeline import frame_result_to_legacy_report, run_kitti_frame_evaluation, save_json_report
 from bev_tracking.pipeline import format_metric
-from bev_tracking.result_types import FrameError, FrameResult
+from bev_tracking.result_types import BatchResult, FrameError, FrameMetrics, FrameResult
 
 
 def run_kitti_batch_evaluation(
@@ -92,6 +92,196 @@ def run_kitti_batch_frame_results(
             frame_results.append(unexpected_failed_frame_result(frame_id, exc))
 
     return frame_results
+
+
+def run_kitti_batch_result(
+    data_root="data/kitti",
+    frame_ids=None,
+    eps=0.6,
+    min_points=20,
+    oriented=False,
+    nms_iou_threshold=0.3,
+    eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
+):
+    frame_ids = normalize_frame_ids(frame_ids)
+    frame_results = run_kitti_batch_frame_results(
+        data_root=data_root,
+        frame_ids=frame_ids,
+        eps=eps,
+        min_points=min_points,
+        oriented=oriented,
+        nms_iou_threshold=nms_iou_threshold,
+        eval_iou_threshold=eval_iou_threshold,
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+    )
+    return build_batch_result(
+        frame_results=frame_results,
+        data_root=data_root,
+        frame_ids=frame_ids,
+        eps=eps,
+        min_points=min_points,
+        oriented=oriented,
+        nms_iou_threshold=nms_iou_threshold,
+        eval_iou_threshold=eval_iou_threshold,
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+    )
+
+
+def build_batch_result(
+    frame_results,
+    data_root="data/kitti",
+    frame_ids=None,
+    eps=0.6,
+    min_points=20,
+    oriented=False,
+    nms_iou_threshold=0.3,
+    eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
+):
+    frame_ids = normalize_frame_ids(frame_ids) if frame_ids is not None else [result.frame_id for result in frame_results]
+    iou_keys = metric_keys(eval_iou_threshold, auxiliary_iou_thresholds)
+    frame_counts = count_frame_statuses(frame_results, requested=len(frame_ids))
+    metrics_by_iou = aggregate_frame_result_metrics(frame_results, iou_keys)
+    totals = aggregate_frame_result_totals(frame_results, iou_keys)
+    error_counts, error_stage_counts = count_frame_errors(frame_results)
+
+    return BatchResult(
+        status=derive_batch_status(frame_counts),
+        frame_results=frame_results,
+        frame_counts=frame_counts,
+        metrics_by_iou=metrics_by_iou,
+        totals={
+            **totals,
+            "data_root": str(data_root),
+            "box_mode": "oriented_pca" if oriented else "axis_aligned",
+            "parameters": {
+                "eps": float(eps),
+                "min_points": int(min_points),
+                "nms_iou_threshold": float(nms_iou_threshold),
+                "eval_iou_threshold": float(eval_iou_threshold),
+                "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
+            },
+        },
+        error_counts=error_counts,
+        error_stage_counts=error_stage_counts,
+        artifacts={"requested_frame_ids": frame_ids},
+    )
+
+
+def count_frame_statuses(frame_results, requested):
+    counts = {
+        "requested": int(requested),
+        "processed": len(frame_results),
+        "metric_valid": 0,
+        "success": 0,
+        "partial_success": 0,
+        "skipped": 0,
+        "failed": 0,
+        "excluded_from_metrics": 0,
+    }
+
+    for result in frame_results:
+        status = FrameStatus(result.status)
+        counts[status.value] += 1
+        if result.metric_valid:
+            counts["metric_valid"] += 1
+        else:
+            counts["excluded_from_metrics"] += 1
+
+    return counts
+
+
+def derive_batch_status(frame_counts):
+    if frame_counts["requested"] == 0:
+        return BatchStatus.FAILED
+    if frame_counts["metric_valid"] == 0:
+        return BatchStatus.FAILED
+    if frame_counts["success"] == frame_counts["requested"]:
+        return BatchStatus.SUCCESS
+    return BatchStatus.PARTIAL_SUCCESS
+
+
+def aggregate_frame_result_metrics(frame_results, iou_keys):
+    valid_results = [result for result in frame_results if result.metric_valid]
+    metrics_by_iou = {}
+    for iou_key in iou_keys:
+        frame_metrics = [result.metrics_by_iou.get(iou_key) for result in valid_results]
+        metrics_by_iou[iou_key] = aggregate_frame_metrics(frame_metrics)
+    return metrics_by_iou
+
+
+def aggregate_frame_metrics(metrics_list):
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+    total_neutralized = 0
+
+    for metrics in metrics_list:
+        if metrics is None:
+            continue
+        if isinstance(metrics, dict):
+            metrics = FrameMetrics(**metrics)
+        total_tp += metrics.tp
+        total_fp += metrics.fp
+        total_fn += metrics.fn
+        total_neutralized += metrics.neutralized_detections
+
+    return FrameMetrics(
+        tp=total_tp,
+        fp=total_fp,
+        fn=total_fn,
+        precision=safe_divide(total_tp, total_tp + total_fp),
+        recall=safe_divide(total_tp, total_tp + total_fn),
+        f1=safe_f1(total_tp, total_fp, total_fn),
+        neutralized_detections=total_neutralized,
+    )
+
+
+def aggregate_frame_result_totals(frame_results, iou_keys):
+    valid_results = [result for result in frame_results if result.metric_valid]
+    totals = {
+        "num_points": 0,
+        "num_labels_raw": 0,
+        "num_positive_gt": 0,
+        "num_neutral_gt": 0,
+        "num_excluded_gt": 0,
+        "num_dontcare": 0,
+        "num_gt_outside_roi": 0,
+        "num_invalid_gt": 0,
+        "num_raw_detections": 0,
+        "num_car_detections_before_nms": 0,
+        "num_detections_after_nms": 0,
+        "num_ignored_detection_class": 0,
+        "num_detections_outside_roi": 0,
+        "num_suppressed_by_nms": 0,
+    }
+
+    for result in valid_results:
+        for key in list(totals):
+            totals[key] += getattr(result, key) or 0
+
+    for iou_key in iou_keys:
+        suffix = iou_suffix(iou_key)
+        totals[f"neutralized_{suffix}"] = sum(
+            (result.metrics_by_iou.get(iou_key).neutralized_detections if result.metrics_by_iou.get(iou_key) else 0)
+            for result in valid_results
+        )
+
+    return totals
+
+
+def count_frame_errors(frame_results):
+    counts_by_code = {}
+    counts_by_stage = {}
+    for result in frame_results:
+        if result.error is None:
+            continue
+        error_code = str(result.error.error_code)
+        error_stage = str(result.error.error_stage)
+        counts_by_code[error_code] = counts_by_code.get(error_code, 0) + 1
+        counts_by_stage[error_stage] = counts_by_stage.get(error_stage, 0) + 1
+    return dict(sorted(counts_by_code.items())), dict(sorted(counts_by_stage.items()))
 
 
 def precheck_kitti_frame_inputs(data_root, frame_id):
@@ -261,6 +451,10 @@ def collect_report_metrics_by_iou(report, iou_keys):
     return {iou_key: get_report_metrics_for_iou(report, iou_key) for iou_key in iou_keys}
 
 
+def is_metric_valid_report(report):
+    return bool(report.get("metric_valid", True))
+
+
 def aggregate_metrics(metrics_list):
     total_tp = 0
     total_fp = 0
@@ -402,6 +596,3 @@ def csv_metric(value):
     if value is None:
         return ""
     return f"{value:.6f}"
-
-def is_metric_valid_report(report):
-    return bool(report.get("metric_valid", True))
