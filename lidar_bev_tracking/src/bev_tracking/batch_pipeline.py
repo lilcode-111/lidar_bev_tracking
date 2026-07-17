@@ -2,8 +2,11 @@ import csv
 from pathlib import Path
 
 from bev_tracking.eval_policy import safe_divide, safe_f1
-from bev_tracking.pipeline import run_kitti_bev_evaluation, save_json_report
+from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
+from bev_tracking.kitti import resolve_kitti_calib_path, resolve_kitti_paths
+from bev_tracking.pipeline import frame_result_to_legacy_report, run_kitti_frame_evaluation, save_json_report
 from bev_tracking.pipeline import format_metric
+from bev_tracking.result_types import FrameError, FrameResult
 
 
 def run_kitti_batch_evaluation(
@@ -18,21 +21,21 @@ def run_kitti_batch_evaluation(
     report_dir="outputs/reports",
 ):
     frame_ids = normalize_frame_ids(frame_ids)
+    frame_results = run_kitti_batch_frame_results(
+        data_root=data_root,
+        frame_ids=frame_ids,
+        eps=eps,
+        min_points=min_points,
+        oriented=oriented,
+        nms_iou_threshold=nms_iou_threshold,
+        eval_iou_threshold=eval_iou_threshold,
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+    )
     frame_reports = []
 
-    for frame_id in frame_ids:
-        report, output_path = run_kitti_bev_evaluation(
-            data_root=data_root,
-            frame_id=frame_id,
-            eps=eps,
-            min_points=min_points,
-            oriented=oriented,
-            nms_iou_threshold=nms_iou_threshold,
-            eval_iou_threshold=eval_iou_threshold,
-            auxiliary_iou_thresholds=auxiliary_iou_thresholds,
-            report_dir=report_dir,
-        )
-        report["report_path"] = str(output_path)
+    for frame_result in frame_results:
+        report = frame_result_to_legacy_report(frame_result)
+        report["report_path"] = ""
         frame_reports.append(report)
 
     summary = summarize_batch_reports(
@@ -53,6 +56,82 @@ def run_kitti_batch_evaluation(
     save_json_report(summary, summary_path)
     save_frame_csv(frame_reports, csv_path)
     return summary, summary_path, csv_path
+
+
+def run_kitti_batch_frame_results(
+    data_root="data/kitti",
+    frame_ids=None,
+    eps=0.6,
+    min_points=20,
+    oriented=False,
+    nms_iou_threshold=0.3,
+    eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
+):
+    frame_results = []
+    for frame_id in normalize_frame_ids(frame_ids):
+        skipped = precheck_kitti_frame_inputs(data_root, frame_id)
+        if skipped is not None:
+            frame_results.append(skipped)
+            continue
+
+        try:
+            frame_results.append(
+                run_kitti_frame_evaluation(
+                    data_root=data_root,
+                    frame_id=frame_id,
+                    eps=eps,
+                    min_points=min_points,
+                    oriented=oriented,
+                    nms_iou_threshold=nms_iou_threshold,
+                    eval_iou_threshold=eval_iou_threshold,
+                    auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+                )
+            )
+        except Exception as exc:
+            frame_results.append(unexpected_failed_frame_result(frame_id, exc))
+
+    return frame_results
+
+
+def precheck_kitti_frame_inputs(data_root, frame_id):
+    frame_id = str(frame_id).zfill(6)
+    velodyne_path, label_path = resolve_kitti_paths(data_root, frame_id)
+    calib_path = resolve_kitti_calib_path(data_root, frame_id)
+
+    if not velodyne_path.exists():
+        return skipped_frame_result(frame_id, ErrorCode.MISSING_BIN, "missing KITTI point cloud file", velodyne_path)
+    if not label_path.exists():
+        return skipped_frame_result(frame_id, ErrorCode.MISSING_LABEL, "missing KITTI label file", label_path)
+    if not calib_path.exists():
+        return skipped_frame_result(frame_id, ErrorCode.MISSING_CALIB, "missing KITTI calib file", calib_path)
+    return None
+
+
+def skipped_frame_result(frame_id, error_code, message, input_path):
+    return FrameResult(
+        frame_id=frame_id,
+        status=FrameStatus.SKIPPED,
+        error=FrameError(
+            error_code=error_code,
+            error_stage=ErrorStage.INPUT_CHECK,
+            error_message=message,
+            input_path=input_path,
+        ),
+    )
+
+
+def unexpected_failed_frame_result(frame_id, exc):
+    return FrameResult(
+        frame_id=str(frame_id).zfill(6),
+        status=FrameStatus.FAILED,
+        error=FrameError(
+            error_code=ErrorCode.UNEXPECTED_FRAME_ERROR,
+            error_stage=ErrorStage.UNKNOWN,
+            error_message=str(exc),
+            exception_type=type(exc).__name__,
+        ),
+    )
 
 
 def run_kitti_batch_evaluation_from_config(config):
@@ -93,15 +172,16 @@ def summarize_batch_reports(
     total_gt_boxes = 0
     total_detections = 0
     iou_keys = metric_keys(eval_iou_threshold, auxiliary_iou_thresholds)
+    valid_frame_reports = [report for report in frame_reports if is_metric_valid_report(report)]
 
-    for report in frame_reports:
-        total_points += report["num_points"]
-        total_gt_boxes += report["num_gt_boxes"]
-        total_detections += report["num_detections_after_nms"]
+    for report in valid_frame_reports:
+        total_points += report.get("num_points") or 0
+        total_gt_boxes += report.get("num_gt_boxes") or 0
+        total_detections += report.get("num_detections_after_nms") or 0
 
     metrics_by_iou = {}
     for iou_key in iou_keys:
-        frame_metrics = [get_report_metrics_for_iou(report, iou_key) for report in frame_reports]
+        frame_metrics = [get_report_metrics_for_iou(report, iou_key) for report in valid_frame_reports]
         metrics_by_iou[iou_key] = aggregate_metrics(frame_metrics)
 
     primary_key = format_iou_key(eval_iou_threshold)
@@ -138,7 +218,10 @@ def summarize_batch_reports(
                 "num_points": report["num_points"],
                 "num_gt_boxes": report["num_gt_boxes"],
                 "num_detections_after_nms": report["num_detections_after_nms"],
-                "metrics": report["metrics"],
+                "status": report.get("status"),
+                "metric_valid": is_metric_valid_report(report),
+                "error": report.get("error"),
+                "metrics": report.get("metrics", {}),
                 "metrics_by_iou": collect_report_metrics_by_iou(report, iou_keys),
                 "report_path": report["report_path"],
             }
@@ -165,12 +248,16 @@ def iou_suffix(iou_key):
 
 
 def get_report_metrics_for_iou(report, iou_key):
+    if not is_metric_valid_report(report):
+        return None
     if iou_key == format_iou_key(report["iou_threshold"]):
         return report["metrics"]
     return report["auxiliary"][iou_key]["metrics"]
 
 
 def collect_report_metrics_by_iou(report, iou_keys):
+    if not is_metric_valid_report(report):
+        return {}
     return {iou_key: get_report_metrics_for_iou(report, iou_key) for iou_key in iou_keys}
 
 
@@ -181,6 +268,8 @@ def aggregate_metrics(metrics_list):
     per_class = {}
 
     for metrics in metrics_list:
+        if metrics is None:
+            continue
         total_tp += metrics["tp"]
         total_fp += metrics["fp"]
         total_fn += metrics["fn"]
@@ -251,6 +340,14 @@ def save_frame_csv(frame_reports, csv_path):
             for iou_key in iou_keys:
                 metrics = get_report_metrics_for_iou(report, iou_key)
                 suffix = iou_suffix(iou_key)
+                if metrics is None:
+                    row[f"tp_{suffix}"] = ""
+                    row[f"fp_{suffix}"] = ""
+                    row[f"fn_{suffix}"] = ""
+                    row[f"precision_{suffix}"] = ""
+                    row[f"recall_{suffix}"] = ""
+                    row[f"f1_{suffix}"] = ""
+                    continue
                 row[f"tp_{suffix}"] = metrics["tp"]
                 row[f"fp_{suffix}"] = metrics["fp"]
                 row[f"fn_{suffix}"] = metrics["fn"]
@@ -263,7 +360,9 @@ def save_frame_csv(frame_reports, csv_path):
 def report_iou_keys(frame_reports):
     if not frame_reports:
         return []
-    first = frame_reports[0]
+    first = next((report for report in frame_reports if is_metric_valid_report(report)), None)
+    if first is None:
+        return ["0.50", "0.25"]
     return metric_keys(
         first["iou_threshold"],
         [float(key) for key in first.get("auxiliary", {}).keys()],
@@ -303,3 +402,6 @@ def csv_metric(value):
     if value is None:
         return ""
     return f"{value:.6f}"
+
+def is_metric_valid_report(report):
+    return bool(report.get("metric_valid", True))

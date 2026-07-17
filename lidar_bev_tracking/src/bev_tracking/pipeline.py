@@ -417,6 +417,7 @@ def detection_count_kwargs(raw_detections, detections_after_nms):
 
 
 def frame_result_to_legacy_report(frame_result):
+    frame_result_dict = frame_result.to_dict()
     legacy_evaluation = frame_result.artifacts.get("legacy_evaluation")
     if legacy_evaluation is None:
         legacy_evaluation = {
@@ -427,9 +428,11 @@ def frame_result_to_legacy_report(frame_result):
         }
 
     report = {
-        "frame_id": frame_result.to_dict()["frame_id"],
+        "frame_id": frame_result_dict["frame_id"],
         "status": frame_result.status.value,
         "metric_valid": frame_result.metric_valid,
+        "error": frame_result_dict["error"],
+        "warnings": frame_result_dict["warnings"],
         "num_points": frame_result.num_points,
         "num_labels": frame_result.num_labels_raw,
         "num_labels_raw": frame_result.num_labels_raw,
@@ -448,7 +451,7 @@ def frame_result_to_legacy_report(frame_result):
         "box_mode": frame_result.artifacts.get("box_mode"),
         "parameters": frame_result.artifacts.get("parameters", {}),
         "metrics_by_iou": frame_result.metrics_by_iou,
-        "frame_result": frame_result.to_dict(),
+        "frame_result": frame_result_dict,
     }
     report.update(legacy_evaluation)
     return report
