@@ -22,3 +22,4 @@ evaluation:
 
 outputs:
   report_dir: outputs/reports
+  batch_report_root: outputs/kitti_batch_eval

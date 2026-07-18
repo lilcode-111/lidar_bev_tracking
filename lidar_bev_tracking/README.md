@@ -22,6 +22,7 @@ A lightweight autonomous-driving perception project for learning LiDAR BEV repre
 - Run KITTI BEV evaluation from YAML configs for reproducible experiments.
 - Run multi-frame KITTI BEV batch evaluation and export summary JSON plus per-frame CSV.
 - Evaluate Car-only BEV detections with explicit positive/neutral/excluded policy, primary IoU=0.5, auxiliary IoU=0.25, fixed neutral IoU=0.5, and deterministic det_index ordering.
+- Write batch evaluation runs as reproducible report directories with summary JSON, per-frame CSV, config snapshots, Git metadata, frame manifest, and per-frame JSON.
 
 ## Quick Start
 
@@ -62,6 +63,9 @@ outputs/reports/kitti_eval_000000_axis_aligned.json
 outputs/reports/kitti_eval_000000_oriented.json
 outputs/reports/kitti_batch_eval_oriented.json
 outputs/reports/kitti_batch_eval_frames_oriented.csv
+outputs/kitti_batch_eval/<run_id>/summary.json
+outputs/kitti_batch_eval/<run_id>/frames.csv
+outputs/kitti_batch_eval/<run_id>/frames/000000.json
 ```
 
 ## KITTI Data Layout

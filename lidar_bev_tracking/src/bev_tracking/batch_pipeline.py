@@ -340,6 +340,50 @@ def run_kitti_batch_evaluation_from_config(config):
     )
 
 
+def run_kitti_batch_report_from_config(config, config_input_path=None, command=None):
+    data_config = config["data"]
+    frame_ids = data_config.get("frame_ids") or [data_config["frame_id"]]
+    output_root = config["outputs"].get("batch_report_root", "outputs/kitti_batch_eval")
+    batch_result = run_kitti_batch_result(
+        data_root=data_config["root"],
+        frame_ids=frame_ids,
+        eps=config["detector"]["eps"],
+        min_points=config["detector"]["min_points"],
+        oriented=config["detector"]["oriented"],
+        nms_iou_threshold=config["nms"]["iou_threshold"],
+        eval_iou_threshold=config["evaluation"]["iou_threshold"],
+        auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
+    )
+
+    from bev_tracking.report_writer import write_batch_report
+
+    return write_batch_report(
+        batch_result,
+        output_root=output_root,
+        config_input_path=config_input_path,
+        config_effective=config,
+        task_name="kitti_car_batch",
+        command=command,
+    )
+
+
+def format_batch_report_summary(batch_result, paths):
+    frame_counts = batch_result.frame_counts
+    return "\n".join(
+        [
+            f"batch status: {batch_result.status.value}",
+            f'frames requested: {frame_counts["requested"]}',
+            f'frames metric valid: {frame_counts["metric_valid"]}',
+            f'frames success: {frame_counts["success"]}',
+            f'frames skipped: {frame_counts["skipped"]}',
+            f'frames failed: {frame_counts["failed"]}',
+            f'saved {paths["summary_json"]}',
+            f'saved {paths["frames_csv"]}',
+            f'run directory: {paths["summary_json"].parent}',
+        ]
+    )
+
+
 def normalize_frame_ids(frame_ids):
     if frame_ids is None:
         return ["000000"]
