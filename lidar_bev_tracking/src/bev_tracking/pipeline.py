@@ -47,7 +47,7 @@ def run_kitti_frame_evaluation(
                 total_start=total_start,
             )
     except FileNotFoundError as exc:
-        return failed_frame_result(
+        return skipped_frame_result(
             frame_id,
             ErrorCode.MISSING_BIN,
             ErrorStage.POINT_CLOUD_LOAD,
@@ -77,22 +77,17 @@ def run_kitti_frame_evaluation(
             total_start=total_start,
         )
 
+    parse_start = perf_counter()
     try:
-        parse_start = perf_counter()
         labels = load_kitti_labels(label_path)
-        calib = load_kitti_calib(calib_path)
-        parse_time_ms = elapsed_ms(parse_start)
     except FileNotFoundError as exc:
-        input_path = label_path if "label" in str(exc).lower() else calib_path
-        code = ErrorCode.MISSING_LABEL if input_path == label_path else ErrorCode.MISSING_CALIB
-        stage = ErrorStage.LABEL_LOAD if input_path == label_path else ErrorStage.CALIB_LOAD
-        return failed_frame_result(
+        return skipped_frame_result(
             frame_id,
-            code,
-            stage,
+            ErrorCode.MISSING_LABEL,
+            ErrorStage.LABEL_LOAD,
             str(exc),
             exception=exc,
-            input_path=input_path,
+            input_path=label_path,
             num_points=len(points),
             load_time_ms=load_time_ms,
             total_start=total_start,
@@ -100,11 +95,11 @@ def run_kitti_frame_evaluation(
     except ValueError as exc:
         return failed_frame_result(
             frame_id,
-            ErrorCode.CALIB_PARSE_FAILED,
-            ErrorStage.CALIB_PARSE,
+            ErrorCode.LABEL_PARSE_FAILED,
+            ErrorStage.LABEL_PARSE,
             str(exc),
             exception=exc,
-            input_path=calib_path,
+            input_path=label_path,
             num_points=len(points),
             load_time_ms=load_time_ms,
             total_start=total_start,
@@ -118,6 +113,49 @@ def run_kitti_frame_evaluation(
             exception=exc,
             input_path=label_path,
             num_points=len(points),
+            load_time_ms=load_time_ms,
+            total_start=total_start,
+        )
+
+    try:
+        calib = load_kitti_calib(calib_path)
+        parse_time_ms = elapsed_ms(parse_start)
+    except FileNotFoundError as exc:
+        return skipped_frame_result(
+            frame_id,
+            ErrorCode.MISSING_CALIB,
+            ErrorStage.CALIB_LOAD,
+            str(exc),
+            exception=exc,
+            input_path=calib_path,
+            num_points=len(points),
+            num_labels_raw=len(labels),
+            load_time_ms=load_time_ms,
+            total_start=total_start,
+        )
+    except ValueError as exc:
+        return failed_frame_result(
+            frame_id,
+            ErrorCode.CALIB_PARSE_FAILED,
+            ErrorStage.CALIB_PARSE,
+            str(exc),
+            exception=exc,
+            input_path=calib_path,
+            num_points=len(points),
+            num_labels_raw=len(labels),
+            load_time_ms=load_time_ms,
+            total_start=total_start,
+        )
+    except Exception as exc:
+        return failed_frame_result(
+            frame_id,
+            ErrorCode.CALIB_READ_FAILED,
+            ErrorStage.CALIB_LOAD,
+            str(exc),
+            exception=exc,
+            input_path=calib_path,
+            num_points=len(points),
+            num_labels_raw=len(labels),
             load_time_ms=load_time_ms,
             total_start=total_start,
         )
@@ -347,6 +385,24 @@ def failed_frame_result(frame_id, error_code, error_stage, error_message, except
     return result
 
 
+def skipped_frame_result(frame_id, error_code, error_stage, error_message, exception=None, input_path=None, total_start=None, **kwargs):
+    result = FrameResult(
+        frame_id=frame_id,
+        status=FrameStatus.SKIPPED,
+        error=FrameError(
+            error_code=error_code,
+            error_stage=error_stage,
+            error_message=error_message,
+            exception_type=type(exception).__name__ if exception is not None else None,
+            input_path=input_path,
+        ),
+        **kwargs,
+    )
+    if total_start is not None:
+        result.total_time_ms = elapsed_ms(total_start)
+    return result
+
+
 def evaluation_to_metrics_by_iou(evaluation):
     metrics_by_iou = {
         f'{evaluation["iou_threshold"]:.2f}': frame_metrics_from_evaluation(evaluation)
@@ -366,6 +422,7 @@ def frame_metrics_from_evaluation(evaluation):
         recall=metrics["recall"],
         f1=metrics["f1"],
         neutralized_detections=len(evaluation.get("neutralized_detections", [])),
+        per_class=metrics.get("per_class", {}),
     )
 
 

@@ -60,6 +60,7 @@ class FrameMetrics:
     recall: float | None = None
     f1: float | None = None
     neutralized_detections: int = 0
+    per_class: dict = field(default_factory=dict)
 
     def to_dict(self):
         return {
@@ -70,6 +71,7 @@ class FrameMetrics:
             "recall": to_json_compatible(self.recall),
             "f1": to_json_compatible(self.f1),
             "neutralized_detections": int(self.neutralized_detections),
+            "per_class": to_json_compatible(self.per_class),
         }
 
 

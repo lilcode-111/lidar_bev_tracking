@@ -8,12 +8,22 @@ from bev_tracking.result_types import BatchResult, FrameError, FrameMetrics, Fra
 
 class ResultTypesTest(unittest.TestCase):
     def test_frame_metrics_to_dict_is_json_serializable(self):
-        metrics = FrameMetrics(tp=1, fp=2, fn=3, precision=0.25, recall=0.5, f1=0.333333, neutralized_detections=4)
+        metrics = FrameMetrics(
+            tp=1,
+            fp=2,
+            fn=3,
+            precision=0.25,
+            recall=0.5,
+            f1=0.333333,
+            neutralized_detections=4,
+            per_class={"car": {"tp": 1, "fp": 2, "fn": 3, "precision": 0.25, "recall": 0.5, "f1": 0.333333}},
+        )
 
         output = metrics.to_dict()
 
         self.assertEqual(output["tp"], 1)
         self.assertEqual(output["neutralized_detections"], 4)
+        self.assertEqual(output["per_class"]["car"]["tp"], 1)
         json.dumps(output)
 
     def test_frame_error_to_dict_uses_stable_values(self):

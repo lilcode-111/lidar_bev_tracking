@@ -10,8 +10,26 @@ def valid_frame(frame_id, tp, fp, fn, neutralized=0):
         frame_id=frame_id,
         status=FrameStatus.SUCCESS,
         metrics_by_iou={
-            "0.50": FrameMetrics(tp=tp, fp=fp, fn=fn, precision=0.0, recall=0.0, f1=0.0, neutralized_detections=neutralized),
-            "0.25": FrameMetrics(tp=tp + 1, fp=fp, fn=fn, precision=0.0, recall=0.0, f1=0.0, neutralized_detections=neutralized + 1),
+            "0.50": FrameMetrics(
+                tp=tp,
+                fp=fp,
+                fn=fn,
+                precision=0.0,
+                recall=0.0,
+                f1=0.0,
+                neutralized_detections=neutralized,
+                per_class={"car": {"tp": tp, "fp": fp, "fn": fn}},
+            ),
+            "0.25": FrameMetrics(
+                tp=tp + 1,
+                fp=fp,
+                fn=fn,
+                precision=0.0,
+                recall=0.0,
+                f1=0.0,
+                neutralized_detections=neutralized + 1,
+                per_class={"car": {"tp": tp + 1, "fp": fp, "fn": fn}},
+            ),
         },
         num_points=100,
         num_positive_gt=tp + fn,
@@ -46,12 +64,17 @@ class BatchMetricsAggregationTest(unittest.TestCase):
         self.assertEqual(metrics_050.precision, 3 / 4)
         self.assertEqual(metrics_050.recall, 3 / 4)
         self.assertEqual(metrics_050.f1, 6 / 8)
+        self.assertEqual(metrics_050.per_class["car"]["tp"], 3)
+        self.assertEqual(metrics_050.per_class["car"]["fp"], 1)
+        self.assertEqual(metrics_050.per_class["car"]["fn"], 1)
+        self.assertEqual(metrics_050.per_class["car"]["f1"], 6 / 8)
 
         metrics_025 = batch.metrics_by_iou["0.25"]
         self.assertEqual(metrics_025.tp, 5)
         self.assertEqual(metrics_025.fp, 1)
         self.assertEqual(metrics_025.fn, 1)
         self.assertEqual(metrics_025.neutralized_detections, 3)
+        self.assertEqual(metrics_025.per_class["car"]["tp"], 5)
         self.assertEqual(batch.totals["num_points"], 200)
 
     def test_legacy_reports_without_metric_valid_are_treated_as_valid(self):

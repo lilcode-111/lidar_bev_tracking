@@ -67,11 +67,23 @@ class FramePipelineResultTest(unittest.TestCase):
             self.assertTrue(result.metric_valid)
             self.assertIn("0.50", result.metrics_by_iou)
             self.assertIn("0.25", result.metrics_by_iou)
+            self.assertIn("car", result.metrics_by_iou["0.50"].per_class)
             self.assertGreater(result.num_points, 0)
             self.assertEqual(result.num_labels_raw, 3)
             self.assertIsNotNone(result.load_time_ms)
             self.assertIsNotNone(result.total_time_ms)
             self.assertFalse((Path(tmp) / "outputs").exists())
+
+    def test_pipeline_missing_inputs_are_skipped_not_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = make_mini_kitti(tmp)
+            missing_bin = data_root / "training" / "velodyne" / "000000.bin"
+            missing_bin.unlink()
+
+            result = run_kitti_frame_evaluation(data_root=data_root, frame_id="000000")
+
+            self.assertEqual(result.status, FrameStatus.SKIPPED)
+            self.assertFalse(result.metric_valid)
 
     def test_legacy_pipeline_still_writes_json_report(self):
         with tempfile.TemporaryDirectory() as tmp:

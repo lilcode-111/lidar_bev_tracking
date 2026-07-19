@@ -216,6 +216,7 @@ def aggregate_frame_metrics(metrics_list):
     total_fp = 0
     total_fn = 0
     total_neutralized = 0
+    per_class = {}
 
     for metrics in metrics_list:
         if metrics is None:
@@ -226,6 +227,7 @@ def aggregate_frame_metrics(metrics_list):
         total_fp += metrics.fp
         total_fn += metrics.fn
         total_neutralized += metrics.neutralized_detections
+        merge_per_class_metrics(per_class, metrics.per_class)
 
     return FrameMetrics(
         tp=total_tp,
@@ -235,7 +237,33 @@ def aggregate_frame_metrics(metrics_list):
         recall=safe_divide(total_tp, total_tp + total_fn),
         f1=safe_f1(total_tp, total_fp, total_fn),
         neutralized_detections=total_neutralized,
+        per_class=finalize_per_class_metrics(per_class),
     )
+
+
+def merge_per_class_metrics(target, per_class):
+    for class_name, class_metrics in (per_class or {}).items():
+        class_target = target.setdefault(class_name, {"tp": 0, "fp": 0, "fn": 0})
+        class_target["tp"] += int(class_metrics.get("tp", 0))
+        class_target["fp"] += int(class_metrics.get("fp", 0))
+        class_target["fn"] += int(class_metrics.get("fn", 0))
+
+
+def finalize_per_class_metrics(per_class):
+    finalized = {}
+    for class_name, class_metrics in per_class.items():
+        tp = class_metrics["tp"]
+        fp = class_metrics["fp"]
+        fn = class_metrics["fn"]
+        finalized[class_name] = {
+            "tp": int(tp),
+            "fp": int(fp),
+            "fn": int(fn),
+            "precision": safe_divide(tp, tp + fp),
+            "recall": safe_divide(tp, tp + fn),
+            "f1": safe_f1(tp, fp, fn),
+        }
+    return dict(sorted(finalized.items()))
 
 
 def aggregate_frame_result_totals(frame_results, iou_keys):
