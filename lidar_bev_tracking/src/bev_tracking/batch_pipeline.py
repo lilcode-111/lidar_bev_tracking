@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+from time import perf_counter
 
 from bev_tracking.eval_policy import safe_divide, safe_f1
 from bev_tracking.error_codes import BatchStatus, ErrorCode, ErrorStage, FrameStatus
@@ -372,6 +373,10 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
     data_config = config["data"]
     frame_ids = data_config.get("frame_ids") or [data_config["frame_id"]]
     output_root = config["outputs"].get("batch_report_root", "outputs/kitti_batch_eval")
+    from bev_tracking.report_writer import utc_now_iso
+
+    started_at = utc_now_iso()
+    total_start_time = perf_counter()
     batch_result = run_kitti_batch_result(
         data_root=data_config["root"],
         frame_ids=frame_ids,
@@ -392,6 +397,8 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
         config_effective=config,
         task_name="kitti_car_batch",
         command=command,
+        started_at=started_at,
+        total_start_time=total_start_time,
     )
 
 

@@ -2,15 +2,15 @@ import csv
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 from bev_tracking.batch_pipeline import build_batch_result, iou_suffix
-from bev_tracking.error_codes import BatchStatus, ErrorCode, ErrorStage, FrameStatus
-from bev_tracking.result_types import BatchResult, FrameError, FrameResult, NUMERIC_COUNT_FIELDS, TIME_FIELDS, to_json_compatible
+from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
+from bev_tracking.result_types import FrameError, NUMERIC_COUNT_FIELDS, TIME_FIELDS, to_json_compatible
 
 
 SCHEMA_VERSION = "13.0"
@@ -61,6 +61,14 @@ CSV_FIELDNAMES = [
 ]
 
 
+class ReportWriteError(RuntimeError):
+    def __init__(self, error_code, output_path, cause):
+        self.error_code = ErrorCode(error_code)
+        self.output_path = Path(output_path)
+        self.cause = cause
+        super().__init__(f"{self.error_code.value}: {self.output_path}: {cause}")
+
+
 def write_batch_report(
     batch_result,
     output_root="outputs/kitti_batch_eval",
@@ -70,40 +78,47 @@ def write_batch_report(
     command=None,
     started_at=None,
     finished_at=None,
+    total_start_time=None,
 ):
     config_hash = compute_config_hash(config_effective or {})
     run_id = make_run_id(task_name, config_hash)
     run_dir = create_run_dir(output_root, run_id)
     paths = report_paths(run_dir)
     started_at = started_at or utc_now_iso()
+    total_start_time = total_start_time if total_start_time is not None else perf_counter()
 
-    try:
-        write_config_input(config_input_path, paths["config_input"])
-        atomic_write_json(paths["config_effective"], config_effective or {})
-        git_metadata = capture_git_metadata()
-        atomic_write_json(paths["git_metadata"], git_metadata)
-        atomic_write_json(paths["frame_manifest"], build_frame_manifest(batch_result))
+    write_config_input(config_input_path, paths["config_input"])
+    write_required_json(paths["config_effective"], config_effective or {}, ErrorCode.CONFIG_SNAPSHOT_WRITE_FAILED)
+    git_metadata = capture_git_metadata()
+    write_required_json(paths["git_metadata"], git_metadata, ErrorCode.GIT_METADATA_UNAVAILABLE)
 
-        updated_frames = []
-        for frame_result in batch_result.frame_results:
-            updated_frames.append(write_frame_report(frame_result, paths["per_frame_report_dir"]))
+    updated_frames = []
+    for frame_result in batch_result.frame_results:
+        updated_frames.append(write_frame_report(frame_result, paths["per_frame_report_dir"]))
 
-        final_batch = rebuild_batch_after_report_write(
-            batch_result,
-            updated_frames,
-            run_id=run_id,
-            started_at=started_at,
-            finished_at=finished_at or utc_now_iso(),
-            config_hash=config_hash,
-            git_metadata=git_metadata,
-            artifacts={key: str(value) for key, value in paths.items()},
-        )
-        atomic_write_csv(paths["frames_csv"], [frame_to_csv_row(frame) for frame in final_batch.frame_results], CSV_FIELDNAMES)
-        summary = build_summary(final_batch, command=command)
-        atomic_write_json(paths["summary_json"], summary)
-        return final_batch, paths
-    except Exception:
-        raise
+    final_batch = rebuild_batch_after_report_write(
+        batch_result,
+        updated_frames,
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=None,
+        total_time_ms=None,
+        config_hash=config_hash,
+        git_metadata=git_metadata,
+        artifacts={key: str(value) for key, value in paths.items()},
+    )
+    write_required_json(paths["frame_manifest"], build_frame_manifest(final_batch), ErrorCode.FRAME_MANIFEST_WRITE_FAILED)
+    write_required_csv(
+        paths["frames_csv"],
+        [frame_to_csv_row(frame) for frame in final_batch.frame_results],
+        CSV_FIELDNAMES,
+        ErrorCode.CSV_WRITE_FAILED,
+    )
+    final_batch.finished_at = finished_at or utc_now_iso()
+    final_batch.total_time_ms = elapsed_ms(total_start_time) if total_start_time is not None else None
+    summary = build_summary(final_batch, command=command)
+    write_required_json(paths["summary_json"], summary, ErrorCode.SUMMARY_WRITE_FAILED)
+    return final_batch, paths
 
 
 def make_run_id(task_name, config_hash, now=None):
@@ -119,8 +134,11 @@ def create_run_dir(output_root, run_id):
     while candidate.exists():
         candidate = output_root / f"{run_id}_{suffix}"
         suffix += 1
-    candidate.mkdir(parents=True)
-    (candidate / "frames").mkdir()
+    try:
+        candidate.mkdir(parents=True)
+        (candidate / "frames").mkdir()
+    except Exception as exc:
+        raise ReportWriteError(ErrorCode.OUTPUT_DIR_CREATE_FAILED, candidate, exc) from exc
     return candidate
 
 
@@ -139,23 +157,27 @@ def report_paths(run_dir):
 
 def write_config_input(config_input_path, output_path):
     output_path = Path(output_path)
-    if config_input_path is None:
-        atomic_write_text(output_path, "")
-        return
-    config_input_path = Path(config_input_path)
-    if config_input_path.exists():
-        atomic_write_text(output_path, config_input_path.read_text(encoding="utf-8"))
-    else:
-        atomic_write_text(output_path, str(config_input_path))
+    try:
+        if config_input_path is None:
+            atomic_write_text(output_path, "")
+            return
+        config_input_path = Path(config_input_path)
+        if config_input_path.exists():
+            atomic_write_text(output_path, config_input_path.read_text(encoding="utf-8"))
+        else:
+            atomic_write_text(output_path, str(config_input_path))
+    except Exception as exc:
+        raise ReportWriteError(ErrorCode.CONFIG_SNAPSHOT_WRITE_FAILED, output_path, exc) from exc
 
 
 def write_frame_report(frame_result, per_frame_report_dir):
     frame_report_path = Path(per_frame_report_dir) / f"{str(frame_result.frame_id).zfill(6)}.json"
     try:
-        frame_result.artifacts["frame_report_path"] = frame_report_path
         atomic_write_json(frame_report_path, frame_result.to_dict())
+        frame_result.artifacts["frame_report_path"] = frame_report_path
         return frame_result
     except Exception as exc:
+        frame_result.artifacts.pop("frame_report_path", None)
         if frame_result.metric_valid:
             frame_result.status = FrameStatus.PARTIAL_SUCCESS
             frame_result.error = FrameError(
@@ -169,7 +191,7 @@ def write_frame_report(frame_result, per_frame_report_dir):
         return frame_result
 
 
-def rebuild_batch_after_report_write(batch_result, frame_results, run_id, started_at, finished_at, config_hash, git_metadata, artifacts):
+def rebuild_batch_after_report_write(batch_result, frame_results, run_id, started_at, finished_at, total_time_ms, config_hash, git_metadata, artifacts):
     parameters = batch_result.totals.get("parameters", {})
     rebuilt = build_batch_result(
         frame_results=frame_results,
@@ -186,6 +208,7 @@ def rebuild_batch_after_report_write(batch_result, frame_results, run_id, starte
     rebuilt.run_id = run_id
     rebuilt.started_at = started_at
     rebuilt.finished_at = finished_at
+    rebuilt.total_time_ms = total_time_ms
     rebuilt.config_hash = config_hash
     rebuilt.git_commit = git_metadata.get("commit")
     rebuilt.git_dirty = git_metadata.get("dirty")
@@ -305,6 +328,24 @@ def atomic_write_json(path, data):
     atomic_write_text(path, json.dumps(to_json_compatible(data), indent=2) + "\n")
 
 
+def write_required_json(path, data, error_code):
+    try:
+        atomic_write_json(path, data)
+    except ReportWriteError:
+        raise
+    except Exception as exc:
+        raise ReportWriteError(error_code, path, exc) from exc
+
+
+def write_required_csv(path, rows, fieldnames, error_code):
+    try:
+        atomic_write_csv(path, rows, fieldnames)
+    except ReportWriteError:
+        raise
+    except Exception as exc:
+        raise ReportWriteError(error_code, path, exc) from exc
+
+
 def atomic_write_csv(path, rows, fieldnames):
     path = Path(path)
     tmp_path = path.with_name(f".{path.name}.tmp")
@@ -358,3 +399,7 @@ def csv_safe(value):
 
 def utc_now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def elapsed_ms(start_time):
+    return float((perf_counter() - start_time) * 1000.0)

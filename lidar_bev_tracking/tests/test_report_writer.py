@@ -1,3 +1,4 @@
+import csv
 import json
 import tempfile
 import unittest
@@ -5,7 +6,8 @@ from pathlib import Path
 
 from bev_tracking.batch_pipeline import build_batch_result
 from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
-from bev_tracking.report_writer import write_batch_report
+from bev_tracking import report_writer
+from bev_tracking.report_writer import ReportWriteError, write_batch_report
 from bev_tracking.result_types import FrameError, FrameMetrics, FrameResult
 
 
@@ -61,6 +63,9 @@ class ReportWriterTest(unittest.TestCase):
 
             summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
             self.assertEqual(summary["run"]["batch_status"], final_batch.status.value)
+            self.assertIsNotNone(summary["run"]["started_at"])
+            self.assertIsNotNone(summary["run"]["finished_at"])
+            self.assertIsNotNone(summary["run"]["duration_ms"])
             self.assertEqual(summary["frames"]["requested"], 2)
             self.assertEqual(summary["frames"]["metric_valid"], 1)
             self.assertEqual(summary["errors"]["counts_by_code"]["missing_bin"], 1)
@@ -69,6 +74,68 @@ class ReportWriterTest(unittest.TestCase):
             csv_text = paths["frames_csv"].read_text(encoding="utf-8")
             self.assertIn("tp_iou_0_50", csv_text)
             self.assertIn("missing_bin", csv_text)
+
+    def test_frame_report_write_failure_updates_final_manifest_and_drops_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = build_batch_result(frame_results=[frame("000000")], frame_ids=["000000"])
+            original = report_writer.atomic_write_json
+
+            def fail_frame_json(path, data):
+                if Path(path).name == "000000.json":
+                    raise PermissionError("frame json blocked")
+                return original(path, data)
+
+            try:
+                report_writer.atomic_write_json = fail_frame_json
+                final_batch, paths = write_batch_report(
+                    batch,
+                    output_root=Path(tmp) / "kitti_batch_eval",
+                    config_effective={"data": {"frame_ids": ["000000"]}},
+                    command="unit-test",
+                )
+            finally:
+                report_writer.atomic_write_json = original
+
+            self.assertEqual(final_batch.frame_results[0].status, FrameStatus.PARTIAL_SUCCESS)
+            self.assertIsNone(final_batch.frame_results[0].artifacts.get("frame_report_path"))
+            self.assertFalse((paths["per_frame_report_dir"] / "000000.json").exists())
+
+            manifest = json.loads(paths["frame_manifest"].read_text(encoding="utf-8"))
+            summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
+            with open(paths["frames_csv"], "r", encoding="utf-8", newline="") as f:
+                rows = list(csv.DictReader(f))
+
+            self.assertEqual(manifest["frames"][0]["status"], "partial_success")
+            self.assertEqual(summary["frames"]["status_by_frame"]["000000"], "partial_success")
+            self.assertEqual(summary["errors"]["counts_by_code"]["frame_report_write_failed"], 1)
+            self.assertEqual(rows[0]["status"], "partial_success")
+            self.assertEqual(rows[0]["error_code"], "frame_report_write_failed")
+            self.assertEqual(rows[0]["frame_report_path"], "")
+
+    def test_required_summary_write_failure_uses_stable_error_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = build_batch_result(frame_results=[frame("000000")], frame_ids=["000000"])
+            original = report_writer.atomic_write_json
+
+            def fail_summary(path, data):
+                if Path(path).name == "summary.json":
+                    raise PermissionError("summary blocked")
+                return original(path, data)
+
+            try:
+                report_writer.atomic_write_json = fail_summary
+                with self.assertRaises(ReportWriteError) as ctx:
+                    write_batch_report(
+                        batch,
+                        output_root=Path(tmp) / "kitti_batch_eval",
+                        config_effective={"data": {"frame_ids": ["000000"]}},
+                        command="unit-test",
+                    )
+            finally:
+                report_writer.atomic_write_json = original
+
+            self.assertEqual(ctx.exception.error_code, ErrorCode.SUMMARY_WRITE_FAILED)
+            self.assertEqual(ctx.exception.output_path.name, "summary.json")
 
 
 if __name__ == "__main__":
