@@ -60,6 +60,7 @@ class ErrorCode(StableStrEnum):
     FRAME_MANIFEST_WRITE_FAILED = "frame_manifest_write_failed"
     CSV_WRITE_FAILED = "csv_write_failed"
     SUMMARY_WRITE_FAILED = "summary_write_failed"
+    FAILURE_CASES_WRITE_FAILED = "failure_cases_write_failed"
     GIT_METADATA_UNAVAILABLE = "git_metadata_unavailable"
     UNEXPECTED_FRAME_ERROR = "unexpected_frame_error"
     UNEXPECTED_BATCH_ERROR = "unexpected_batch_error"

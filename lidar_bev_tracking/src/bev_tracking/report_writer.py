@@ -10,10 +10,11 @@ from time import perf_counter
 
 from bev_tracking.batch_pipeline import build_batch_result, iou_suffix
 from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
-from bev_tracking.result_types import FrameError, NUMERIC_COUNT_FIELDS, TIME_FIELDS, to_json_compatible
+from bev_tracking.result_types import FailureCategory, FrameError, NUMERIC_COUNT_FIELDS, TIME_FIELDS, to_json_compatible
 
 
 SCHEMA_VERSION = "13.0"
+FAILURE_ANALYSIS_SCHEMA_VERSION = "14.0"
 REPORT_IOS = ("0.50", "0.25")
 CSV_FIELDNAMES = [
     "frame_id",
@@ -152,6 +153,57 @@ def report_paths(run_dir):
         "git_metadata": run_dir / "git.json",
         "frame_manifest": run_dir / "frame_manifest.json",
         "per_frame_report_dir": run_dir / "frames",
+    }
+
+
+def write_failure_cases_report(run_directory, failure_cases, top_k=5):
+    run_directory = Path(run_directory)
+    output_path = run_directory / "failure_cases.json"
+    payload = build_failure_cases_report(run_directory, failure_cases, top_k)
+    write_required_json(path=output_path, data=payload, error_code=ErrorCode.FAILURE_CASES_WRITE_FAILED)
+    return payload, output_path
+
+
+def build_failure_cases_report(run_directory, failure_cases, top_k):
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+        raise ValueError("top_k must be a positive integer")
+
+    serialized_cases = [case.to_dict() if hasattr(case, "to_dict") else dict(case) for case in failure_cases]
+    category_order = [category.value for category in FailureCategory]
+    counts_by_category = {category: 0 for category in category_order}
+    for case in serialized_cases:
+        category = case.get("category")
+        if category not in counts_by_category:
+            raise ValueError(f"unknown failure category: {category}")
+        counts_by_category[category] += 1
+
+    source_run_ids = {case.get("source_run_id") for case in serialized_cases if case.get("source_run_id") is not None}
+    if len(source_run_ids) > 1:
+        raise ValueError("failure cases contain multiple source run ids")
+    source_run_id = next(iter(source_run_ids), Path(run_directory).name)
+
+    thresholds = {float(case.get("primary_iou_threshold", 0.5)) for case in serialized_cases}
+    if len(thresholds) > 1:
+        raise ValueError("failure cases contain multiple primary IoU thresholds")
+    primary_iou_threshold = next(iter(thresholds), 0.5)
+
+    return {
+        "schema_version": FAILURE_ANALYSIS_SCHEMA_VERSION,
+        "source": {
+            "run_id": source_run_id,
+            "run_directory": Path(run_directory),
+            "primary_iou_threshold": primary_iou_threshold,
+        },
+        "selection": {
+            "top_k": top_k,
+            "category_order": category_order,
+            "effective_car_detection_count": "tp + fp + neutralized_detections @ IoU=0.50",
+        },
+        "summary": {
+            "total_failure_cases": len(serialized_cases),
+            "counts_by_category": counts_by_category,
+        },
+        "failure_cases": serialized_cases,
     }
 
 
@@ -361,9 +413,17 @@ def atomic_write_text(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def compute_config_hash(config):
