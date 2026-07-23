@@ -17,7 +17,15 @@ def main(argv=None):
     try:
         failure_cases = generate_failure_cases_from_run_directory(args.run_dir, top_k=args.top_k)
         payload, output_path = write_failure_cases_report(args.run_dir, failure_cases, top_k=args.top_k)
-    except (FailureAnalysisError, ReportWriteError, ValueError) as exc:
+    except FailureAnalysisError as exc:
+        print(f"failure analysis failed: {exc.error_code.value}", file=sys.stderr)
+        print(f"cause: {exc}", file=sys.stderr)
+        return 1
+    except ReportWriteError as exc:
+        print(f"failure analysis failed: {exc.error_code.value}", file=sys.stderr)
+        print(f"cause: {exc.cause}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
         print(f"failure analysis failed: {exc}", file=sys.stderr)
         return 1
 

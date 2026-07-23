@@ -165,8 +165,9 @@ def write_failure_cases_report(run_directory, failure_cases, top_k=5):
 
 
 def build_failure_cases_report(run_directory, failure_cases, top_k):
-    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
-        raise ValueError("top_k must be a positive integer")
+    from bev_tracking.failure_analysis import validate_top_k
+
+    top_k = validate_top_k(top_k)
 
     serialized_cases = [case.to_dict() if hasattr(case, "to_dict") else dict(case) for case in failure_cases]
     category_order = [category.value for category in FailureCategory]

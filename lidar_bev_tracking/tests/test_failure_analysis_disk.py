@@ -7,7 +7,9 @@ from pathlib import Path
 from bev_tracking.batch_pipeline import build_batch_result
 from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
 from bev_tracking.failure_analysis import (
+    DuplicateFrameIdError,
     SourceContractError,
+    SourceConsistencyError,
     generate_failure_cases,
     generate_failure_cases_from_run_directory,
     load_batch_result_from_run_directory,
@@ -93,8 +95,9 @@ class FailureAnalysisDiskTest(unittest.TestCase):
             manifest["frames"][0]["status"] = "failed"
             paths["frame_manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaisesRegex(SourceContractError, "status mismatch"):
+            with self.assertRaisesRegex(SourceConsistencyError, "status mismatch") as ctx:
                 load_batch_result_from_run_directory(paths["summary_json"].parent)
+            self.assertEqual(ctx.exception.error_code, ErrorCode.SOURCE_CONSISTENCY_ERROR)
 
     def test_primary_metric_mismatch_in_csv_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,7 +111,7 @@ class FailureAnalysisDiskTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerows(rows)
 
-            with self.assertRaisesRegex(SourceContractError, "primary metric mismatch"):
+            with self.assertRaisesRegex(SourceConsistencyError, "primary metric mismatch"):
                 load_batch_result_from_run_directory(paths["summary_json"].parent)
 
     def test_frame_set_and_duplicate_ids_are_rejected(self):
@@ -116,7 +119,7 @@ class FailureAnalysisDiskTest(unittest.TestCase):
             _, paths = write_sample_run(tmp)
             (paths["per_frame_report_dir"] / "000001.json").unlink()
 
-            with self.assertRaisesRegex(SourceContractError, "file set"):
+            with self.assertRaisesRegex(SourceConsistencyError, "file set"):
                 load_batch_result_from_run_directory(paths["summary_json"].parent)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,8 +133,9 @@ class FailureAnalysisDiskTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerows(rows)
 
-            with self.assertRaisesRegex(SourceContractError, "duplicate frame_id"):
+            with self.assertRaisesRegex(DuplicateFrameIdError, "duplicate frame_id") as ctx:
                 load_batch_result_from_run_directory(paths["summary_json"].parent)
+            self.assertEqual(ctx.exception.error_code, ErrorCode.DUPLICATE_FRAME_ID)
 
     def test_summary_counts_and_metrics_are_revalidated(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,8 +144,35 @@ class FailureAnalysisDiskTest(unittest.TestCase):
             summary["metrics_by_iou"]["0.50"]["tp"] = 100
             paths["summary_json"].write_text(json.dumps(summary), encoding="utf-8")
 
-            with self.assertRaisesRegex(SourceContractError, "summary primary metric mismatch"):
+            with self.assertRaisesRegex(SourceConsistencyError, "summary primary metric mismatch"):
                 load_batch_result_from_run_directory(paths["summary_json"].parent)
+
+    def test_csv_row_count_mismatch_has_source_consistency_error_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, paths = write_sample_run(tmp)
+            with open(paths["frames_csv"], "r", encoding="utf-8", newline="") as f:
+                rows = list(csv.DictReader(f))
+                fieldnames = list(rows[0])
+            with open(paths["frames_csv"], "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows[:-1])
+
+            with self.assertRaises(SourceConsistencyError) as ctx:
+                load_batch_result_from_run_directory(paths["summary_json"].parent)
+            self.assertEqual(ctx.exception.error_code, ErrorCode.SOURCE_CONSISTENCY_ERROR)
+
+    def test_missing_metric_field_has_source_contract_error_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, paths = write_sample_run(tmp)
+            frame_path = paths["per_frame_report_dir"] / "000000.json"
+            payload = json.loads(frame_path.read_text(encoding="utf-8"))
+            payload["metrics_by_iou"]["0.50"].pop("tp")
+            frame_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaises(SourceContractError) as ctx:
+                load_batch_result_from_run_directory(paths["summary_json"].parent)
+            self.assertEqual(ctx.exception.error_code, ErrorCode.SOURCE_CONTRACT_ERROR)
 
 
 if __name__ == "__main__":

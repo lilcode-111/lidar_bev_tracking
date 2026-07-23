@@ -5,7 +5,13 @@ from pathlib import Path
 
 from bev_tracking.batch_pipeline import build_batch_result
 from bev_tracking.error_codes import FrameStatus
-from bev_tracking.failure_analysis import SourceContractError, effective_car_detection_count, generate_failure_cases, validate_top_k
+from bev_tracking.failure_analysis import (
+    DuplicateFrameIdError,
+    SourceContractError,
+    effective_car_detection_count,
+    generate_failure_cases,
+    validate_top_k,
+)
 from bev_tracking.result_types import FailureCategory, FailureCase, FrameMetrics, FrameResult
 
 
@@ -22,18 +28,23 @@ def frame(
 ):
     metrics = {}
     if status in {FrameStatus.SUCCESS, FrameStatus.PARTIAL_SUCCESS}:
-        metrics = {
-            "0.50": FrameMetrics(
+        precision = None if tp + fp == 0 else tp / (tp + fp)
+        effective_recall = recall if recall is not None else (None if tp + fn == 0 else tp / (tp + fn))
+        f1 = None if 2 * tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
+
+        def frame_metrics():
+            return FrameMetrics(
                 tp=tp,
                 fp=fp,
                 fn=fn,
-                precision=None if tp + fp == 0 else tp / (tp + fp),
-                recall=recall,
-                f1=None,
+                precision=precision,
+                recall=effective_recall,
+                f1=f1,
                 neutralized_detections=neutralized,
                 per_class={"car": {"tp": tp, "fp": fp, "fn": fn}},
             )
-        }
+
+        metrics = {"0.50": frame_metrics(), "0.25": frame_metrics()}
     return FrameResult(
         frame_id=frame_id,
         status=status,
@@ -97,7 +108,7 @@ class FailureAnalysisTest(unittest.TestCase):
         self.assertEqual([case.frame_id for case in fn_cases], ["000003", "000004"])
 
         fp_cases = cases_by_category(cases, FailureCategory.MOST_FALSE_POSITIVES)
-        self.assertEqual([case.frame_id for case in fp_cases], ["000001", "000003"])
+        self.assertEqual([case.frame_id for case in fp_cases], ["000003", "000001"])
 
         recall_cases = cases_by_category(cases, FailureCategory.LOWEST_RECALL)
         self.assertEqual([case.frame_id for case in recall_cases], ["000003", "000004"])
@@ -124,7 +135,7 @@ class FailureAnalysisTest(unittest.TestCase):
     def test_recall_null_is_excluded_from_lowest_recall(self):
         result = batch(
             [
-                frame("000000", tp=0, fp=0, fn=1, recall=None, positive_gt=1),
+                frame("000000", tp=0, fp=0, fn=0, recall=None, positive_gt=0),
                 frame("000001", tp=1, fp=0, fn=1, recall=0.5, positive_gt=2),
             ]
         )
@@ -163,7 +174,7 @@ class FailureAnalysisTest(unittest.TestCase):
         with self.assertRaises(SourceContractError):
             generate_failure_cases(batch([FrameResult(frame_id="000000", status=FrameStatus.SUCCESS)]))
 
-        with self.assertRaises(SourceContractError):
+        with self.assertRaises(DuplicateFrameIdError):
             generate_failure_cases(batch([frame("000000", tp=1), frame("000000", tp=2)]))
 
     def test_generate_failure_cases_does_not_mutate_input(self):

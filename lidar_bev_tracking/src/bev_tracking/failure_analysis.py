@@ -1,9 +1,10 @@
 import csv
 import json
+from numbers import Integral, Real
 from pathlib import Path
 
 from bev_tracking.batch_pipeline import build_batch_result, iou_suffix
-from bev_tracking.error_codes import FrameStatus
+from bev_tracking.error_codes import ErrorCode, FrameStatus
 from bev_tracking.result_types import (
     NUMERIC_COUNT_FIELDS,
     TIME_FIELDS,
@@ -19,6 +20,7 @@ from bev_tracking.result_types import (
 DEFAULT_TOP_K = 5
 PRIMARY_IOU_KEY = "0.50"
 PRIMARY_IOU_THRESHOLD = 0.5
+REQUIRED_ANALYSIS_IOU_KEYS = ("0.50", "0.25")
 REQUIRED_RUN_PATHS = {
     "summary": "summary.json",
     "frames_csv": "frames.csv",
@@ -28,15 +30,32 @@ REQUIRED_RUN_PATHS = {
 
 
 class FailureAnalysisError(ValueError):
-    pass
+    error_code = ErrorCode.SOURCE_CONTRACT_ERROR
+
+    def __init__(self, message):
+        self.error_code = ErrorCode(self.error_code)
+        super().__init__(message)
 
 
 class SourceContractError(FailureAnalysisError):
-    pass
+    error_code = ErrorCode.SOURCE_CONTRACT_ERROR
+
+
+class SourceConsistencyError(FailureAnalysisError):
+    error_code = ErrorCode.SOURCE_CONSISTENCY_ERROR
+
+
+class DuplicateFrameIdError(FailureAnalysisError):
+    error_code = ErrorCode.DUPLICATE_FRAME_ID
+
+
+class InvalidFailureAnalysisConfigError(FailureAnalysisError):
+    error_code = ErrorCode.INVALID_FAILURE_ANALYSIS_CONFIG
 
 
 def generate_failure_cases(batch_result, top_k=DEFAULT_TOP_K, primary_iou_key=PRIMARY_IOU_KEY):
     top_k = validate_top_k(top_k)
+    validate_primary_iou_key(primary_iou_key)
     frames = collect_eligible_frames(batch_result, primary_iou_key)
     cases = []
 
@@ -62,11 +81,14 @@ def generate_failure_cases_from_run_directory(
     top_k=DEFAULT_TOP_K,
     primary_iou_key=PRIMARY_IOU_KEY,
 ):
+    top_k = validate_top_k(top_k)
+    validate_primary_iou_key(primary_iou_key)
     batch_result = load_batch_result_from_run_directory(run_directory, primary_iou_key=primary_iou_key)
     return generate_failure_cases(batch_result, top_k=top_k, primary_iou_key=primary_iou_key)
 
 
 def load_batch_result_from_run_directory(run_directory, primary_iou_key=PRIMARY_IOU_KEY):
+    validate_primary_iou_key(primary_iou_key)
     run_directory = Path(run_directory)
     paths = resolve_run_paths(run_directory)
     summary = read_json_object(paths["summary"], "summary")
@@ -112,8 +134,14 @@ def load_batch_result_from_run_directory(run_directory, primary_iou_key=PRIMARY_
 
 def validate_top_k(top_k):
     if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
-        raise ValueError("top_k must be a positive integer")
+        raise InvalidFailureAnalysisConfigError("top_k must be a positive integer")
     return top_k
+
+
+def validate_primary_iou_key(primary_iou_key):
+    if primary_iou_key != PRIMARY_IOU_KEY:
+        raise InvalidFailureAnalysisConfigError(f"primary_iou_key must be {PRIMARY_IOU_KEY}")
+    return primary_iou_key
 
 
 def resolve_run_paths(run_directory):
@@ -161,33 +189,33 @@ def requested_ids_from_summary(summary):
 def normalize_unique_frame_ids(frame_ids, description):
     normalized = [str(frame_id).zfill(6) for frame_id in frame_ids]
     if len(set(normalized)) != len(normalized):
-        raise SourceContractError(f"duplicate frame_id in {description}")
+        raise DuplicateFrameIdError(f"duplicate frame_id in {description}")
     return normalized
 
 
 def validate_requested_sources(requested_frame_ids, summary, manifest, csv_rows):
     summary_frames = require_dict(summary.get("frames"), "summary.frames")
     if summary_frames.get("requested") != len(requested_frame_ids):
-        raise SourceContractError("summary requested count does not match requested_frame_ids")
+        raise SourceConsistencyError("summary requested count does not match requested_frame_ids")
 
     manifest_requested = manifest.get("requested_frame_ids")
     if not isinstance(manifest_requested, list):
         raise SourceContractError("manifest requested_frame_ids must be a list")
     manifest_requested = normalize_unique_frame_ids(manifest_requested, "manifest requested_frame_ids")
     if manifest_requested != requested_frame_ids:
-        raise SourceContractError("manifest requested_frame_ids do not match summary")
+        raise SourceConsistencyError("manifest requested_frame_ids do not match summary")
 
     manifest_frames = manifest.get("frames")
     if not isinstance(manifest_frames, list) or len(manifest_frames) != len(requested_frame_ids):
-        raise SourceContractError("manifest frame count does not match requested count")
+        raise SourceConsistencyError("manifest frame count does not match requested count")
     if len(csv_rows) != len(requested_frame_ids):
-        raise SourceContractError("frames.csv row count does not match requested count")
+        raise SourceConsistencyError("frames.csv row count does not match requested count")
 
     manifest_ids = set(index_records(manifest_frames, "manifest frames"))
     csv_ids = set(index_records(csv_rows, "frames.csv rows"))
     requested_set = set(requested_frame_ids)
     if manifest_ids != requested_set or csv_ids != requested_set:
-        raise SourceContractError("frame_id sets differ across summary, manifest, and frames.csv")
+        raise SourceConsistencyError("frame_id sets differ across summary, manifest, and frames.csv")
 
 
 def index_records(records, description):
@@ -199,7 +227,7 @@ def index_records(records, description):
             raise SourceContractError(f"{description} contains an invalid record")
         frame_id = str(record["frame_id"]).zfill(6)
         if frame_id in indexed:
-            raise SourceContractError(f"duplicate frame_id in {description}: {frame_id}")
+            raise DuplicateFrameIdError(f"duplicate frame_id in {description}: {frame_id}")
         indexed[frame_id] = record
     return indexed
 
@@ -212,13 +240,13 @@ def validate_frame_file_set(frames_dir, requested_frame_ids):
     actual_ids = {path.stem for path in Path(frames_dir).glob("*.json")}
     expected_ids = set(requested_frame_ids)
     if actual_ids != expected_ids:
-        raise SourceContractError("per-frame JSON file set does not match requested frame_ids")
+        raise SourceConsistencyError("per-frame JSON file set does not match requested frame_ids")
 
 
 def frame_result_from_payload(payload, frame_report_path, run_id, run_directory):
     try:
         metrics_by_iou = {
-            str(iou_key): FrameMetrics(**require_dict(metrics, f"metrics {iou_key}"))
+            str(iou_key): frame_metrics_from_payload(metrics, payload.get("frame_id"), iou_key)
             for iou_key, metrics in require_dict(payload.get("metrics_by_iou", {}), "frame metrics_by_iou").items()
         }
         error_payload = payload.get("error")
@@ -245,6 +273,16 @@ def frame_result_from_payload(payload, frame_report_path, run_id, run_directory)
         raise SourceContractError(f"invalid frame report {frame_report_path}: {exc}") from exc
 
 
+def frame_metrics_from_payload(metrics, frame_id, iou_key):
+    metrics = require_dict(metrics, f"metrics {iou_key}")
+    required_fields = {"tp", "fp", "fn", "precision", "recall", "f1", "neutralized_detections"}
+    missing_fields = sorted(required_fields - set(metrics))
+    if missing_fields:
+        missing = ", ".join(missing_fields)
+        raise SourceContractError(f"frame metrics missing required fields: {frame_id} {iou_key} {missing}")
+    return FrameMetrics(**metrics)
+
+
 def validate_frame_sources(
     frame_id,
     frame_result,
@@ -256,23 +294,23 @@ def validate_frame_sources(
     primary_iou_key,
 ):
     if str(frame_payload.get("frame_id")).zfill(6) != frame_id:
-        raise SourceContractError(f"per-frame report frame_id mismatch: {frame_id}")
+        raise SourceConsistencyError(f"per-frame report frame_id mismatch: {frame_id}")
 
     status = frame_result.status.value
     metric_valid = frame_result.metric_valid
     expected_statuses = [manifest_record.get("status"), csv_record.get("status"), status_by_frame.get(frame_id)]
     if any(value != status for value in expected_statuses):
-        raise SourceContractError(f"status mismatch across reports for frame {frame_id}")
+        raise SourceConsistencyError(f"status mismatch across reports for frame {frame_id}")
 
     payload_metric_valid = frame_payload.get("metric_valid")
     manifest_metric_valid = manifest_record.get("metric_valid")
     csv_metric_valid = parse_csv_bool(csv_record.get("metric_valid"), frame_id)
     if any(value is not metric_valid for value in [payload_metric_valid, manifest_metric_valid, csv_metric_valid]):
-        raise SourceContractError(f"metric_valid mismatch across reports for frame {frame_id}")
+        raise SourceConsistencyError(f"metric_valid mismatch across reports for frame {frame_id}")
 
     recorded_path = csv_record.get("frame_report_path")
     if not path_matches_expected(recorded_path, expected_report_path):
-        raise SourceContractError(f"frame report path mismatch for frame {frame_id}")
+        raise SourceConsistencyError(f"frame report path mismatch for frame {frame_id}")
 
     validate_csv_counts(frame_result, csv_record, frame_id)
     validate_primary_metrics(frame_result, csv_record, frame_id, primary_iou_key)
@@ -307,10 +345,10 @@ def validate_csv_counts(frame_result, csv_record, frame_id):
         actual = csv_record.get(field_name, "")
         if expected is None:
             if actual != "":
-                raise SourceContractError(f"CSV field mismatch for frame {frame_id}: {field_name}")
+                raise SourceConsistencyError(f"CSV field mismatch for frame {frame_id}: {field_name}")
             continue
         if not numeric_values_equal(actual, expected):
-            raise SourceContractError(f"CSV field mismatch for frame {frame_id}: {field_name}")
+            raise SourceConsistencyError(f"CSV field mismatch for frame {frame_id}: {field_name}")
 
 
 def validate_primary_metrics(frame_result, csv_record, frame_id, primary_iou_key):
@@ -327,7 +365,7 @@ def validate_primary_metrics(frame_result, csv_record, frame_id, primary_iou_key
 
     if not frame_result.metric_valid:
         if any(csv_record.get(csv_name, "") != "" for csv_name in fields):
-            raise SourceContractError(f"invalid frame has primary metrics in frames.csv: {frame_id}")
+            raise SourceConsistencyError(f"invalid frame has primary metrics in frames.csv: {frame_id}")
         return
 
     metrics = get_primary_metrics(frame_result, primary_iou_key)
@@ -338,9 +376,9 @@ def validate_primary_metrics(frame_result, csv_record, frame_id, primary_iou_key
         actual = csv_record.get(csv_name, "")
         if expected is None:
             if actual != "":
-                raise SourceContractError(f"primary metric mismatch for frame {frame_id}: {metric_name}")
+                raise SourceConsistencyError(f"primary metric mismatch for frame {frame_id}: {metric_name}")
         elif not numeric_values_equal(actual, expected):
-            raise SourceContractError(f"primary metric mismatch for frame {frame_id}: {metric_name}")
+            raise SourceConsistencyError(f"primary metric mismatch for frame {frame_id}: {metric_name}")
 
 
 def numeric_values_equal(actual, expected):
@@ -389,16 +427,16 @@ def rebuild_batch_from_disk(summary, frame_results, requested_frame_ids, run_dir
 def validate_summary_contract(summary, batch_result, primary_iou_key):
     run = require_dict(summary.get("run"), "summary.run")
     if run.get("batch_status") != batch_result.status.value:
-        raise SourceContractError("summary batch status does not match frame results")
+        raise SourceConsistencyError("summary batch status does not match frame results")
 
     summary_frames = require_dict(summary.get("frames"), "summary.frames")
     for field_name, expected in batch_result.frame_counts.items():
         if summary_frames.get(field_name) != expected:
-            raise SourceContractError(f"summary frame count mismatch: {field_name}")
+            raise SourceConsistencyError(f"summary frame count mismatch: {field_name}")
 
     expected_statuses = {frame.frame_id: frame.status.value for frame in batch_result.frame_results}
     if summary_frames.get("status_by_frame") != expected_statuses:
-        raise SourceContractError("summary status_by_frame does not match per-frame reports")
+        raise SourceConsistencyError("summary status_by_frame does not match per-frame reports")
 
     summary_metrics = require_dict(summary.get("metrics_by_iou"), "summary.metrics_by_iou").get(primary_iou_key)
     if not isinstance(summary_metrics, dict):
@@ -409,9 +447,9 @@ def validate_summary_contract(summary, batch_result, primary_iou_key):
         actual = summary_metrics.get(field_name)
         if expected is None:
             if actual is not None:
-                raise SourceContractError(f"summary primary metric mismatch: {field_name}")
+                raise SourceConsistencyError(f"summary primary metric mismatch: {field_name}")
         elif not numeric_values_equal(actual, expected):
-            raise SourceContractError(f"summary primary metric mismatch: {field_name}")
+            raise SourceConsistencyError(f"summary primary metric mismatch: {field_name}")
 
 
 def collect_eligible_frames(batch_result, primary_iou_key):
@@ -420,18 +458,20 @@ def collect_eligible_frames(batch_result, primary_iou_key):
     for frame in batch_result.frame_results:
         frame_id = str(frame.frame_id).zfill(6)
         if frame_id in seen:
-            raise SourceContractError(f"duplicate frame_id in batch result: {frame_id}")
+            raise DuplicateFrameIdError(f"duplicate frame_id in batch result: {frame_id}")
         seen.add(frame_id)
 
         if not frame.metric_valid:
             continue
 
-        metrics = get_primary_metrics(frame, primary_iou_key)
+        metrics_by_iou = get_required_metrics_by_iou(frame)
+        metrics = metrics_by_iou[primary_iou_key]
         frames.append(
             {
                 "frame": frame,
                 "frame_id": frame_id,
                 "metrics": metrics,
+                "metrics_by_iou": metrics_by_iou,
                 "effective_car_detection_count": effective_car_detection_count(metrics),
                 "gt_counts": gt_counts(frame),
                 "detection_counts": detection_counts(frame),
@@ -443,11 +483,31 @@ def collect_eligible_frames(batch_result, primary_iou_key):
 
 
 def get_primary_metrics(frame, primary_iou_key):
-    metrics = frame.metrics_by_iou.get(primary_iou_key)
-    if metrics is None:
-        raise SourceContractError(f"metric-valid frame missing primary IoU metrics: {frame.frame_id} {primary_iou_key}")
-    if isinstance(metrics, dict):
-        metrics = FrameMetrics(**metrics)
+    validate_primary_iou_key(primary_iou_key)
+    return get_required_metrics_by_iou(frame)[primary_iou_key]
+
+
+def get_required_metrics_by_iou(frame):
+    missing_keys = [iou_key for iou_key in REQUIRED_ANALYSIS_IOU_KEYS if iou_key not in frame.metrics_by_iou]
+    if missing_keys:
+        missing = ", ".join(missing_keys)
+        raise SourceContractError(f"metric-valid frame missing required IoU metrics: {frame.frame_id} {missing}")
+
+    metrics_by_iou = {}
+    for iou_key in sorted(frame.metrics_by_iou, key=iou_sort_value, reverse=True):
+        raw_metrics = frame.metrics_by_iou[iou_key]
+        try:
+            metrics = FrameMetrics(**raw_metrics) if isinstance(raw_metrics, dict) else raw_metrics
+        except TypeError as exc:
+            raise SourceContractError(f"invalid metrics payload: {frame.frame_id} {iou_key}: {exc}") from exc
+        if not isinstance(metrics, FrameMetrics):
+            raise SourceContractError(f"invalid metrics type: {frame.frame_id} {iou_key}")
+        validate_metric_fields(frame.frame_id, iou_key, metrics)
+        metrics_by_iou[iou_key] = metrics
+    return metrics_by_iou
+
+
+def validate_metric_fields(frame_id, iou_key, metrics):
     required = {
         "tp": metrics.tp,
         "fp": metrics.fp,
@@ -456,8 +516,28 @@ def get_primary_metrics(frame, primary_iou_key):
     }
     for key, value in required.items():
         if value is None:
-            raise SourceContractError(f"metric-valid frame missing required metric field: {frame.frame_id} {key}")
-    return metrics
+            raise SourceContractError(f"metric-valid frame missing required metric field: {frame_id} {iou_key} {key}")
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise SourceContractError(f"metric-valid frame has invalid metric field: {frame_id} {iou_key} {key}")
+
+    for key in ["precision", "recall", "f1"]:
+        value = getattr(metrics, key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, Real)):
+            raise SourceContractError(f"metric-valid frame has invalid metric field: {frame_id} {iou_key} {key}")
+
+    if metrics.tp + metrics.fp > 0 and metrics.precision is None:
+        raise SourceContractError(f"metric-valid frame missing required metric field: {frame_id} {iou_key} precision")
+    if metrics.tp + metrics.fn > 0 and metrics.recall is None:
+        raise SourceContractError(f"metric-valid frame missing required metric field: {frame_id} {iou_key} recall")
+    if 2 * metrics.tp + metrics.fp + metrics.fn > 0 and metrics.f1 is None:
+        raise SourceContractError(f"metric-valid frame missing required metric field: {frame_id} {iou_key} f1")
+
+
+def iou_sort_value(iou_key):
+    try:
+        return float(iou_key)
+    except (TypeError, ValueError):
+        return float("-inf")
 
 
 def effective_car_detection_count(metrics):
@@ -475,7 +555,6 @@ def rank_category(frames, category, top_k, sort_key, eligibility_fn, diagnostic_
 
 def build_failure_case(category, rank, item, diagnostic_only=False):
     frame = item["frame"]
-    metrics = item["metrics"]
     return FailureCase(
         category=category,
         rank=rank,
@@ -486,7 +565,7 @@ def build_failure_case(category, rank, item, diagnostic_only=False):
         metric_valid=frame.metric_valid,
         primary_iou_threshold=PRIMARY_IOU_THRESHOLD,
         effective_car_detection_count=item["effective_car_detection_count"],
-        metrics_by_iou={PRIMARY_IOU_KEY: metrics.to_dict()},
+        metrics_by_iou={iou_key: value.to_dict() for iou_key, value in item["metrics_by_iou"].items()},
         gt_counts=item["gt_counts"],
         detection_counts=item["detection_counts"],
         frame_report_path=frame.artifacts.get("frame_report_path"),
@@ -512,12 +591,12 @@ def ranking_values_for(category, item):
         "tp": int(metrics.tp),
         "fp": int(metrics.fp),
         "fn": int(metrics.fn),
+        "precision": metrics.precision,
         "recall": metrics.recall,
+        "num_positive_gt": int(item["gt_counts"]["num_positive_gt"]),
         "neutralized_detections": int(metrics.neutralized_detections),
         "effective_car_detection_count": int(item["effective_car_detection_count"]),
     }
-    if category == FailureCategory.ZERO_DETECTION_WITH_GT:
-        values["num_positive_gt"] = item["gt_counts"]["num_positive_gt"]
     return values
 
 
@@ -526,7 +605,13 @@ def has_false_negatives(item):
 
 
 def most_false_negatives_key(item):
-    return (-item["metrics"].fn, item["frame_id"])
+    return (
+        -item["metrics"].fn,
+        item["metrics"].recall,
+        -item["gt_counts"]["num_positive_gt"],
+        -item["metrics"].fp,
+        item["frame_id"],
+    )
 
 
 def has_false_positives(item):
@@ -534,7 +619,13 @@ def has_false_positives(item):
 
 
 def most_false_positives_key(item):
-    return (-item["metrics"].fp, item["frame_id"])
+    return (
+        -item["metrics"].fp,
+        item["metrics"].precision,
+        -item["effective_car_detection_count"],
+        -item["metrics"].fn,
+        item["frame_id"],
+    )
 
 
 def has_low_recall(item):
@@ -542,7 +633,13 @@ def has_low_recall(item):
 
 
 def lowest_recall_key(item):
-    return (item["metrics"].recall, -item["metrics"].fn, item["frame_id"])
+    return (
+        item["metrics"].recall,
+        -item["metrics"].fn,
+        -item["gt_counts"]["num_positive_gt"],
+        -item["metrics"].fp,
+        item["frame_id"],
+    )
 
 
 def has_zero_detection_with_gt(item):
@@ -558,7 +655,13 @@ def has_effective_car_detections(item):
 
 
 def highest_effective_car_detections_key(item):
-    return (-item["effective_car_detection_count"], -item["metrics"].fp, item["frame_id"])
+    return (
+        -item["effective_car_detection_count"],
+        -item["metrics"].fp,
+        -item["metrics"].tp,
+        -item["metrics"].neutralized_detections,
+        item["frame_id"],
+    )
 
 
 def gt_counts(frame):
