@@ -37,7 +37,7 @@ highest_effective_car_detections
 effective_car_detection_count = TP + FP + neutralized_detections @ IoU=0.50
 ```
 
-默认每类输出前 5 帧。同分时最终按 `frame_id` 升序排序，保证重复运行结果稳定。
+默认每类输出前 5 帧。每类使用冻结的多级排序规则，同分时最终按 `frame_id` 升序排序，保证重复运行结果稳定。筛选使用主指标 IoU=0.50，但每个 FailureCase 会同时保留 IoU=0.50 和 IoU=0.25 的完整指标，便于区分“完全漏检”和“定位不准”。
 
 ## 输出
 
@@ -47,4 +47,26 @@ effective_car_detection_count = TP + FP + neutralized_detections @ IoU=0.50
 outputs/kitti_batch_eval/<run_id>/failure_cases.json
 ```
 
-报告包含源 run、`top_k`、类别计数和完整 FailureCase 列表。写入失败时不会用残缺内容覆盖已有正式报告。
+报告采用 `14.0` schema，包含：
+
+```text
+schema_version / analysis_version
+source / config / validation
+category_definitions / generated_categories
+categories
+summary / generation
+```
+
+`categories` 中五类始终存在。每类分别记录：
+
+```text
+eligible_count
+selected_count
+sort_rule
+diagnostic_only
+cases
+```
+
+即使某一类没有候选帧，也会输出 `eligible_count=0`、`selected_count=0` 和 `cases=[]`。`summary` 同时记录 case 条目总数和去重后的失败帧数量，因为同一帧允许进入多个类别。
+
+除 `generation.generated_at` 外，相同输入和配置重复运行会产生相同的业务内容。写入使用原子替换，失败时不会用残缺内容覆盖已有正式报告。

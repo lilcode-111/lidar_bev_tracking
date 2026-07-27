@@ -72,7 +72,7 @@ outputs/kitti_batch_eval/<run_id>/failure_cases.json
 
 ## Failure Analysis
 
-Failure analysis consumes a complete Batch Robustness run directory without rerunning detection, NMS, or evaluation. It validates `summary.json`, `frames.csv`, `frame_manifest.json`, and `frames/*.json`, then ranks five failure or diagnostic categories using the primary IoU=0.50 metrics.
+Failure analysis consumes a complete Batch Robustness run directory without rerunning detection, NMS, or evaluation. It validates `summary.json`, `frames.csv`, `frame_manifest.json`, and `frames/*.json`, then ranks five failure or diagnostic categories using the primary IoU=0.50 metrics. The `14.0` report schema records source validation, frozen sort rules, eligible/selected counts, empty categories, and full IoU=0.50/0.25 context for each selected case.
 
 ```bash
 PYTHONPATH=src python scripts/run_failure_analysis.py \

@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from bev_tracking.failure_analysis import FailureAnalysisError, generate_failure_cases_from_run_directory
+from bev_tracking.failure_analysis import FailureAnalysisError, analyze_failure_cases_from_run_directory
 from bev_tracking.report_writer import ReportWriteError, write_failure_cases_report
 
 
@@ -15,8 +15,8 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     try:
-        failure_cases = generate_failure_cases_from_run_directory(args.run_dir, top_k=args.top_k)
-        payload, output_path = write_failure_cases_report(args.run_dir, failure_cases, top_k=args.top_k)
+        analysis_result = analyze_failure_cases_from_run_directory(args.run_dir, top_k=args.top_k)
+        payload, output_path = write_failure_cases_report(args.run_dir, analysis_result)
     except FailureAnalysisError as exc:
         print(f"failure analysis failed: {exc.error_code.value}", file=sys.stderr)
         print(f"cause: {exc}", file=sys.stderr)

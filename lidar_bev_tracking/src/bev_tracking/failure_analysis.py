@@ -9,8 +9,10 @@ from bev_tracking.result_types import (
     NUMERIC_COUNT_FIELDS,
     TIME_FIELDS,
     BatchResult,
+    FailureAnalysisResult,
     FailureCase,
     FailureCategory,
+    FailureCategoryResult,
     FrameError,
     FrameMetrics,
     FrameResult,
@@ -21,6 +23,32 @@ DEFAULT_TOP_K = 5
 PRIMARY_IOU_KEY = "0.50"
 PRIMARY_IOU_THRESHOLD = 0.5
 REQUIRED_ANALYSIS_IOU_KEYS = ("0.50", "0.25")
+CATEGORY_SORT_RULES = {
+    FailureCategory.MOST_FALSE_NEGATIVES: ["fn_desc", "recall_asc", "positive_gt_desc", "fp_desc", "frame_id_asc"],
+    FailureCategory.MOST_FALSE_POSITIVES: [
+        "fp_desc",
+        "precision_asc",
+        "effective_car_detection_count_desc",
+        "fn_desc",
+        "frame_id_asc",
+    ],
+    FailureCategory.LOWEST_RECALL: ["recall_asc", "fn_desc", "positive_gt_desc", "fp_desc", "frame_id_asc"],
+    FailureCategory.ZERO_DETECTION_WITH_GT: ["positive_gt_desc", "fn_desc", "frame_id_asc"],
+    FailureCategory.HIGHEST_EFFECTIVE_CAR_DETECTIONS: [
+        "effective_car_detection_count_desc",
+        "fp_desc",
+        "tp_desc",
+        "neutralized_detections_desc",
+        "frame_id_asc",
+    ],
+}
+CATEGORY_ELIGIBILITY_RULES = {
+    FailureCategory.MOST_FALSE_NEGATIVES: "fn > 0",
+    FailureCategory.MOST_FALSE_POSITIVES: "fp > 0",
+    FailureCategory.LOWEST_RECALL: "recall is defined and fn > 0",
+    FailureCategory.ZERO_DETECTION_WITH_GT: "positive_gt > 0 and effective_car_detection_count == 0",
+    FailureCategory.HIGHEST_EFFECTIVE_CAR_DETECTIONS: "effective_car_detection_count > 0",
+}
 REQUIRED_RUN_PATHS = {
     "summary": "summary.json",
     "frames_csv": "frames.csv",
@@ -54,26 +82,63 @@ class InvalidFailureAnalysisConfigError(FailureAnalysisError):
 
 
 def generate_failure_cases(batch_result, top_k=DEFAULT_TOP_K, primary_iou_key=PRIMARY_IOU_KEY):
+    return analyze_failure_cases(batch_result, top_k=top_k, primary_iou_key=primary_iou_key).failure_cases
+
+
+def analyze_failure_cases(
+    batch_result,
+    top_k=DEFAULT_TOP_K,
+    primary_iou_key=PRIMARY_IOU_KEY,
+    source_mode="memory",
+):
     top_k = validate_top_k(top_k)
     validate_primary_iou_key(primary_iou_key)
-    frames = collect_eligible_frames(batch_result, primary_iou_key)
-    cases = []
+    if source_mode not in {"memory", "disk"}:
+        raise InvalidFailureAnalysisConfigError("source_mode must be memory or disk")
 
-    cases.extend(rank_category(frames, FailureCategory.MOST_FALSE_NEGATIVES, top_k, most_false_negatives_key, has_false_negatives))
-    cases.extend(rank_category(frames, FailureCategory.MOST_FALSE_POSITIVES, top_k, most_false_positives_key, has_false_positives))
-    cases.extend(rank_category(frames, FailureCategory.LOWEST_RECALL, top_k, lowest_recall_key, has_low_recall))
-    cases.extend(rank_category(frames, FailureCategory.ZERO_DETECTION_WITH_GT, top_k, zero_detection_with_gt_key, has_zero_detection_with_gt))
-    cases.extend(
-        rank_category(
-            frames,
+    frames = collect_eligible_frames(batch_result, primary_iou_key)
+    category_specs = [
+        (FailureCategory.MOST_FALSE_NEGATIVES, most_false_negatives_key, has_false_negatives, False),
+        (FailureCategory.MOST_FALSE_POSITIVES, most_false_positives_key, has_false_positives, False),
+        (FailureCategory.LOWEST_RECALL, lowest_recall_key, has_low_recall, False),
+        (FailureCategory.ZERO_DETECTION_WITH_GT, zero_detection_with_gt_key, has_zero_detection_with_gt, False),
+        (
             FailureCategory.HIGHEST_EFFECTIVE_CAR_DETECTIONS,
-            top_k,
             highest_effective_car_detections_key,
             has_effective_car_detections,
-            diagnostic_only=True,
+            True,
+        ),
+    ]
+    categories = {}
+    for category, sort_key, eligibility_fn, diagnostic_only in category_specs:
+        candidates = [item for item in frames if eligibility_fn(item)]
+        candidates.sort(key=sort_key)
+        cases = [
+            build_failure_case(category, rank, item, diagnostic_only=diagnostic_only)
+            for rank, item in enumerate(candidates[:top_k], start=1)
+        ]
+        categories[category.value] = FailureCategoryResult(
+            category=category,
+            eligible_count=len(candidates),
+            cases=cases,
+            sort_rule=CATEGORY_SORT_RULES[category],
+            reason_code=reason_code_for(category),
+            eligibility_rule=CATEGORY_ELIGIBILITY_RULES[category],
+            diagnostic_only=diagnostic_only,
         )
+
+    return FailureAnalysisResult(
+        source_mode=source_mode,
+        source_run_id=batch_result.run_id,
+        source_run_directory=batch_source_run_directory(batch_result),
+        source_batch_status=batch_result.status,
+        primary_iou_threshold=PRIMARY_IOU_THRESHOLD,
+        top_k=top_k,
+        eligible_frame_count=len(frames),
+        categories=categories,
+        source_contract_validation_result="passed",
+        source_consistency_validation_result="passed" if source_mode == "disk" else "not_applicable",
     )
-    return cases
 
 
 def generate_failure_cases_from_run_directory(
@@ -81,10 +146,27 @@ def generate_failure_cases_from_run_directory(
     top_k=DEFAULT_TOP_K,
     primary_iou_key=PRIMARY_IOU_KEY,
 ):
+    return analyze_failure_cases_from_run_directory(
+        run_directory,
+        top_k=top_k,
+        primary_iou_key=primary_iou_key,
+    ).failure_cases
+
+
+def analyze_failure_cases_from_run_directory(
+    run_directory,
+    top_k=DEFAULT_TOP_K,
+    primary_iou_key=PRIMARY_IOU_KEY,
+):
     top_k = validate_top_k(top_k)
     validate_primary_iou_key(primary_iou_key)
     batch_result = load_batch_result_from_run_directory(run_directory, primary_iou_key=primary_iou_key)
-    return generate_failure_cases(batch_result, top_k=top_k, primary_iou_key=primary_iou_key)
+    return analyze_failure_cases(
+        batch_result,
+        top_k=top_k,
+        primary_iou_key=primary_iou_key,
+        source_mode="disk",
+    )
 
 
 def load_batch_result_from_run_directory(run_directory, primary_iou_key=PRIMARY_IOU_KEY):

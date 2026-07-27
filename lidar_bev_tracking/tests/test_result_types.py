@@ -3,7 +3,16 @@ import unittest
 from pathlib import Path
 
 from bev_tracking.error_codes import BatchStatus, ErrorCode, ErrorStage, FrameStatus
-from bev_tracking.result_types import BatchResult, FrameError, FrameMetrics, FrameResult
+from bev_tracking.result_types import (
+    BatchResult,
+    FailureAnalysisResult,
+    FailureCase,
+    FailureCategory,
+    FailureCategoryResult,
+    FrameError,
+    FrameMetrics,
+    FrameResult,
+)
 
 
 class ResultTypesTest(unittest.TestCase):
@@ -109,6 +118,41 @@ class ResultTypesTest(unittest.TestCase):
         self.assertEqual(output["frame_results"][0]["status"], "success")
         self.assertEqual(output["metrics_by_iou"]["0.50"]["tp"], 1)
         self.assertEqual(output["artifacts"]["summary_json"], "outputs/kitti_batch_eval/run/summary.json")
+        json.dumps(output)
+
+    def test_failure_analysis_result_preserves_empty_categories(self):
+        selected_case = FailureCase(
+            category=FailureCategory.MOST_FALSE_NEGATIVES,
+            rank=1,
+            frame_id="1",
+            reason_code="high_false_negative_count",
+        )
+        categories = {
+            category.value: FailureCategoryResult(
+                category=category,
+                eligible_count=1 if category == FailureCategory.MOST_FALSE_NEGATIVES else 0,
+                cases=[selected_case] if category == FailureCategory.MOST_FALSE_NEGATIVES else [],
+                sort_rule=["frame_id_asc"],
+            )
+            for category in FailureCategory
+        }
+        result = FailureAnalysisResult(
+            source_mode="memory",
+            source_run_id="run-test",
+            source_run_directory=Path("outputs/run-test"),
+            source_batch_status=BatchStatus.SUCCESS,
+            primary_iou_threshold=0.5,
+            top_k=5,
+            eligible_frame_count=1,
+            categories=categories,
+        )
+
+        output = result.to_dict()
+
+        self.assertEqual(output["categories"]["most_false_negatives"]["selected_count"], 1)
+        self.assertEqual(output["categories"]["most_false_positives"]["selected_count"], 0)
+        self.assertEqual(output["categories"]["most_false_positives"]["cases"], [])
+        self.assertEqual(output["failure_cases"][0]["frame_id"], "000001")
         json.dumps(output)
 
 

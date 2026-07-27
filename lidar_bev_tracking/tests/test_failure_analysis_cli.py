@@ -20,14 +20,14 @@ class FailureAnalysisCliTest(unittest.TestCase):
             DuplicateFrameIdError("duplicate frame"),
             InvalidFailureAnalysisConfigError("invalid top_k"),
         ]
-        original = run_failure_analysis.generate_failure_cases_from_run_directory
+        original = run_failure_analysis.analyze_failure_cases_from_run_directory
 
         try:
             for error in errors:
                 def fail_analysis(*args, _error=error, **kwargs):
                     raise _error
 
-                run_failure_analysis.generate_failure_cases_from_run_directory = fail_analysis
+                run_failure_analysis.analyze_failure_cases_from_run_directory = fail_analysis
                 stderr = io.StringIO()
                 with redirect_stderr(stderr):
                     exit_code = run_failure_analysis.main(["--run-dir", "unused"])
@@ -35,7 +35,7 @@ class FailureAnalysisCliTest(unittest.TestCase):
                 self.assertEqual(exit_code, 1)
                 self.assertIn(error.error_code.value, stderr.getvalue())
         finally:
-            run_failure_analysis.generate_failure_cases_from_run_directory = original
+            run_failure_analysis.analyze_failure_cases_from_run_directory = original
 
     def test_real_invalid_top_k_is_rejected_before_source_io(self):
         stderr = io.StringIO()

@@ -8,7 +8,7 @@ from pathlib import Path
 from bev_tracking import report_writer
 from bev_tracking.batch_pipeline import build_batch_result
 from bev_tracking.error_codes import ErrorCode, FrameStatus
-from bev_tracking.failure_analysis import generate_failure_cases_from_run_directory
+from bev_tracking.failure_analysis import analyze_failure_cases_from_run_directory
 from bev_tracking.report_writer import ReportWriteError, write_batch_report, write_failure_cases_report
 from bev_tracking.result_types import FrameMetrics, FrameResult
 from scripts.run_failure_analysis import main
@@ -55,15 +55,15 @@ class FailureAnalysisReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             final_batch, paths = create_run(tmp)
             run_directory = paths["summary_json"].parent
-            cases = generate_failure_cases_from_run_directory(run_directory, top_k=2)
+            analysis_result = analyze_failure_cases_from_run_directory(run_directory, top_k=2)
 
-            payload, output_path = write_failure_cases_report(run_directory, cases, top_k=2)
+            payload, output_path = write_failure_cases_report(run_directory, analysis_result)
             saved = json.loads(output_path.read_text(encoding="utf-8"))
 
             self.assertEqual(payload["schema_version"], "14.0")
             self.assertEqual(saved["source"]["run_id"], final_batch.run_id)
             self.assertEqual(saved["selection"]["top_k"], 2)
-            self.assertEqual(saved["summary"]["total_failure_cases"], len(cases))
+            self.assertEqual(saved["summary"]["total_failure_cases"], len(analysis_result.failure_cases))
             self.assertEqual(saved["summary"]["counts_by_category"]["most_false_negatives"], 1)
             self.assertEqual(saved["summary"]["counts_by_category"]["most_false_positives"], 1)
             self.assertEqual(saved["failure_cases"][0]["source_run_id"], final_batch.run_id)
@@ -86,8 +86,8 @@ class FailureAnalysisReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _, paths = create_run(tmp)
             run_directory = paths["summary_json"].parent
-            cases = generate_failure_cases_from_run_directory(run_directory, top_k=1)
-            _, output_path = write_failure_cases_report(run_directory, cases, top_k=1)
+            analysis_result = analyze_failure_cases_from_run_directory(run_directory, top_k=1)
+            _, output_path = write_failure_cases_report(run_directory, analysis_result)
             original_text = output_path.read_text(encoding="utf-8")
             original_replace = report_writer.os.replace
 
@@ -99,7 +99,7 @@ class FailureAnalysisReportTest(unittest.TestCase):
             try:
                 report_writer.os.replace = fail_failure_report_replace
                 with self.assertRaises(ReportWriteError) as ctx:
-                    write_failure_cases_report(run_directory, cases, top_k=1)
+                    write_failure_cases_report(run_directory, analysis_result)
             finally:
                 report_writer.os.replace = original_replace
 

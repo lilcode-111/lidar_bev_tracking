@@ -128,6 +128,74 @@ class FailureCase:
 
 
 @dataclass
+class FailureCategoryResult:
+    category: FailureCategory | str
+    eligible_count: int
+    cases: list[FailureCase] = field(default_factory=list)
+    sort_rule: list[str] = field(default_factory=list)
+    reason_code: str = ""
+    eligibility_rule: str = ""
+    diagnostic_only: bool = False
+
+    def __post_init__(self):
+        self.category = FailureCategory(self.category)
+
+    @property
+    def selected_count(self):
+        return len(self.cases)
+
+    def to_dict(self):
+        return {
+            "eligible_count": int(self.eligible_count),
+            "selected_count": int(self.selected_count),
+            "sort_rule": list(self.sort_rule),
+            "diagnostic_only": bool(self.diagnostic_only),
+            "cases": to_json_compatible(self.cases),
+        }
+
+
+@dataclass
+class FailureAnalysisResult:
+    source_mode: str
+    source_run_id: str | None
+    source_run_directory: str | Path | None
+    source_batch_status: BatchStatus | str
+    primary_iou_threshold: float
+    top_k: int
+    eligible_frame_count: int
+    categories: dict[str, FailureCategoryResult] = field(default_factory=dict)
+    source_contract_validation_result: str = "passed"
+    source_consistency_validation_result: str = "not_applicable"
+
+    def __post_init__(self):
+        self.source_batch_status = BatchStatus(self.source_batch_status)
+
+    @property
+    def failure_cases(self):
+        cases = []
+        for category in FailureCategory:
+            result = self.categories.get(category.value)
+            if result is not None:
+                cases.extend(result.cases)
+        return cases
+
+    def to_dict(self):
+        return {
+            "source_mode": str(self.source_mode),
+            "source_run_id": to_json_compatible(self.source_run_id),
+            "source_run_directory": to_json_compatible(self.source_run_directory),
+            "source_batch_status": self.source_batch_status.value,
+            "primary_iou_threshold": float(self.primary_iou_threshold),
+            "top_k": int(self.top_k),
+            "eligible_frame_count": int(self.eligible_frame_count),
+            "categories": {key: value.to_dict() for key, value in self.categories.items()},
+            "source_contract_validation_result": str(self.source_contract_validation_result),
+            "source_consistency_validation_result": str(self.source_consistency_validation_result),
+            "failure_cases": to_json_compatible(self.failure_cases),
+        }
+
+
+@dataclass
 class FrameError:
     error_code: ErrorCode | str
     error_stage: ErrorStage | str
