@@ -10,10 +10,19 @@ from time import perf_counter
 
 from bev_tracking.batch_pipeline import build_batch_result, iou_suffix
 from bev_tracking.error_codes import ErrorCode, ErrorStage, FrameStatus
-from bev_tracking.result_types import FrameError, NUMERIC_COUNT_FIELDS, TIME_FIELDS, to_json_compatible
+from bev_tracking.result_types import (
+    FailureAnalysisResult,
+    FailureCategory,
+    FrameError,
+    NUMERIC_COUNT_FIELDS,
+    TIME_FIELDS,
+    to_json_compatible,
+)
 
 
 SCHEMA_VERSION = "13.0"
+FAILURE_ANALYSIS_SCHEMA_VERSION = "14.0"
+FAILURE_ANALYSIS_VERSION = "failure_analysis_core_v1"
 REPORT_IOS = ("0.50", "0.25")
 CSV_FIELDNAMES = [
     "frame_id",
@@ -153,6 +162,89 @@ def report_paths(run_dir):
         "frame_manifest": run_dir / "frame_manifest.json",
         "per_frame_report_dir": run_dir / "frames",
     }
+
+
+def write_failure_cases_report(run_directory, analysis_result, generated_at=None):
+    run_directory = Path(run_directory)
+    output_path = run_directory / "failure_cases.json"
+    payload = build_failure_cases_report(run_directory, analysis_result, generated_at=generated_at)
+    write_required_json(path=output_path, data=payload, error_code=ErrorCode.FAILURE_CASES_WRITE_FAILED)
+    return payload, output_path
+
+
+def build_failure_cases_report(run_directory, analysis_result, generated_at=None):
+    if not isinstance(analysis_result, FailureAnalysisResult):
+        raise ValueError("analysis_result must be a FailureAnalysisResult")
+
+    serialized_cases = [case.to_dict() for case in analysis_result.failure_cases]
+    category_order = [category.value for category in FailureCategory]
+    categories = {}
+    category_definitions = {}
+    counts_by_category = {}
+    eligible_counts_by_category = {}
+
+    for category in FailureCategory:
+        category_result = analysis_result.categories.get(category.value)
+        if category_result is None:
+            raise ValueError(f"analysis result missing category: {category.value}")
+        if category_result.selected_count > analysis_result.top_k:
+            raise ValueError(f"selected_count exceeds top_k: {category.value}")
+
+        categories[category.value] = category_result.to_dict()
+        category_definitions[category.value] = {
+            "reason_code": category_result.reason_code,
+            "eligibility_rule": category_result.eligibility_rule,
+            "sort_rule": list(category_result.sort_rule),
+            "diagnostic_only": bool(category_result.diagnostic_only),
+        }
+        counts_by_category[category.value] = category_result.selected_count
+        eligible_counts_by_category[category.value] = category_result.eligible_count
+
+    unique_failure_frames = len({case.frame_id for case in analysis_result.failure_cases})
+    generated_at = generated_at or utc_now_iso()
+
+    payload = {
+        "schema_version": FAILURE_ANALYSIS_SCHEMA_VERSION,
+        "analysis_version": FAILURE_ANALYSIS_VERSION,
+        "source": {
+            "mode": analysis_result.source_mode,
+            "run_id": analysis_result.source_run_id or Path(run_directory).name,
+            "run_directory": Path(run_directory),
+            "batch_status": analysis_result.source_batch_status.value,
+        },
+        "config": {
+            "primary_iou": analysis_result.primary_iou_threshold,
+            "required_iou_keys": ["0.50", "0.25"],
+            "top_k": analysis_result.top_k,
+        },
+        "validation": {
+            "source_contract": {"status": analysis_result.source_contract_validation_result},
+            "source_consistency": {"status": analysis_result.source_consistency_validation_result},
+        },
+        "category_definitions": category_definitions,
+        "generated_categories": category_order,
+        "categories": categories,
+        "selection": {
+            "top_k": analysis_result.top_k,
+            "category_order": category_order,
+            "effective_car_detection_count": "tp + fp + neutralized_detections @ IoU=0.50",
+        },
+        "summary": {
+            "eligible_frames": analysis_result.eligible_frame_count,
+            "total_case_entries": len(serialized_cases),
+            "unique_failure_frames": unique_failure_frames,
+            "total_failure_cases": len(serialized_cases),
+            "counts_by_category": counts_by_category,
+            "eligible_counts_by_category": eligible_counts_by_category,
+        },
+        "failure_cases": serialized_cases,
+        "generation": {
+            "generated_at": generated_at,
+            "generator": "bev_tracking.failure_analysis",
+            "business_content_deterministic": True,
+        },
+    }
+    return to_json_compatible(payload)
 
 
 def write_config_input(config_input_path, output_path):
@@ -361,9 +453,17 @@ def atomic_write_text(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def compute_config_hash(config):

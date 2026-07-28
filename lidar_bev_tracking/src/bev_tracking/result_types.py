@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from pathlib import Path
 
-from bev_tracking.error_codes import BatchStatus, ErrorCode, ErrorStage, FrameStatus, is_metric_valid_status
+from bev_tracking.error_codes import BatchStatus, ErrorCode, ErrorStage, FrameStatus, StableStrEnum, is_metric_valid_status
 
 
 NUMERIC_COUNT_FIELDS = [
@@ -72,6 +72,126 @@ class FrameMetrics:
             "f1": to_json_compatible(self.f1),
             "neutralized_detections": int(self.neutralized_detections),
             "per_class": to_json_compatible(self.per_class),
+        }
+
+
+class FailureCategory(StableStrEnum):
+    MOST_FALSE_NEGATIVES = "most_false_negatives"
+    MOST_FALSE_POSITIVES = "most_false_positives"
+    LOWEST_RECALL = "lowest_recall"
+    ZERO_DETECTION_WITH_GT = "zero_detection_with_gt"
+    HIGHEST_EFFECTIVE_CAR_DETECTIONS = "highest_effective_car_detections"
+
+
+@dataclass
+class FailureCase:
+    category: FailureCategory | str
+    rank: int
+    frame_id: str
+    reason_code: str
+    ranking_values: dict = field(default_factory=dict)
+    source_status: FrameStatus | str = FrameStatus.SUCCESS
+    metric_valid: bool = True
+    primary_iou_threshold: float = 0.5
+    effective_car_detection_count: int = 0
+    metrics_by_iou: dict = field(default_factory=dict)
+    gt_counts: dict = field(default_factory=dict)
+    detection_counts: dict = field(default_factory=dict)
+    frame_report_path: str | Path | None = None
+    source_run_id: str | None = None
+    source_run_directory: str | Path | None = None
+    diagnostic_only: bool = False
+
+    def __post_init__(self):
+        self.category = FailureCategory(self.category)
+        self.source_status = FrameStatus(self.source_status)
+
+    def to_dict(self):
+        return {
+            "category": self.category.value,
+            "rank": int(self.rank),
+            "frame_id": str(self.frame_id).zfill(6),
+            "reason_code": str(self.reason_code),
+            "ranking_values": to_json_compatible(self.ranking_values),
+            "source_status": self.source_status.value,
+            "metric_valid": bool(self.metric_valid),
+            "primary_iou_threshold": float(self.primary_iou_threshold),
+            "effective_car_detection_count": int(self.effective_car_detection_count),
+            "metrics_by_iou": to_json_compatible(self.metrics_by_iou),
+            "gt_counts": to_json_compatible(self.gt_counts),
+            "detection_counts": to_json_compatible(self.detection_counts),
+            "frame_report_path": to_json_compatible(self.frame_report_path),
+            "source_run_id": to_json_compatible(self.source_run_id),
+            "source_run_directory": to_json_compatible(self.source_run_directory),
+            "diagnostic_only": bool(self.diagnostic_only),
+        }
+
+
+@dataclass
+class FailureCategoryResult:
+    category: FailureCategory | str
+    eligible_count: int
+    cases: list[FailureCase] = field(default_factory=list)
+    sort_rule: list[str] = field(default_factory=list)
+    reason_code: str = ""
+    eligibility_rule: str = ""
+    diagnostic_only: bool = False
+
+    def __post_init__(self):
+        self.category = FailureCategory(self.category)
+
+    @property
+    def selected_count(self):
+        return len(self.cases)
+
+    def to_dict(self):
+        return {
+            "eligible_count": int(self.eligible_count),
+            "selected_count": int(self.selected_count),
+            "sort_rule": list(self.sort_rule),
+            "diagnostic_only": bool(self.diagnostic_only),
+            "cases": to_json_compatible(self.cases),
+        }
+
+
+@dataclass
+class FailureAnalysisResult:
+    source_mode: str
+    source_run_id: str | None
+    source_run_directory: str | Path | None
+    source_batch_status: BatchStatus | str
+    primary_iou_threshold: float
+    top_k: int
+    eligible_frame_count: int
+    categories: dict[str, FailureCategoryResult] = field(default_factory=dict)
+    source_contract_validation_result: str = "passed"
+    source_consistency_validation_result: str = "not_applicable"
+
+    def __post_init__(self):
+        self.source_batch_status = BatchStatus(self.source_batch_status)
+
+    @property
+    def failure_cases(self):
+        cases = []
+        for category in FailureCategory:
+            result = self.categories.get(category.value)
+            if result is not None:
+                cases.extend(result.cases)
+        return cases
+
+    def to_dict(self):
+        return {
+            "source_mode": str(self.source_mode),
+            "source_run_id": to_json_compatible(self.source_run_id),
+            "source_run_directory": to_json_compatible(self.source_run_directory),
+            "source_batch_status": self.source_batch_status.value,
+            "primary_iou_threshold": float(self.primary_iou_threshold),
+            "top_k": int(self.top_k),
+            "eligible_frame_count": int(self.eligible_frame_count),
+            "categories": {key: value.to_dict() for key, value in self.categories.items()},
+            "source_contract_validation_result": str(self.source_contract_validation_result),
+            "source_consistency_validation_result": str(self.source_consistency_validation_result),
+            "failure_cases": to_json_compatible(self.failure_cases),
         }
 
 
