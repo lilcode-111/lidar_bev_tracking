@@ -16,6 +16,8 @@ DEFAULT_KITTI_EVAL_CONFIG = {
         "eps": 0.6,
         "min_points": 20,
         "oriented": False,
+        "z_min": -0.9,
+        "intensity_min": 0.38,
     },
     "nms": {
         "iou_threshold": 0.3,

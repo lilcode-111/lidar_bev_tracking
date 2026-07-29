@@ -5,22 +5,49 @@ import numpy as np
 from bev_tracking.oriented_box import estimate_oriented_box_xy
 
 
-def filter_obstacle_points(
+DEFAULT_Z_MIN = -0.9
+DEFAULT_INTENSITY_MIN = 0.38
+
+
+def split_obstacle_filter_stages(
     points,
     x_range=(0.0, 40.0),
     y_range=(-20.0, 20.0),
-    z_min=-0.9,
-    intensity_min=0.38,
+    z_min=DEFAULT_Z_MIN,
+    intensity_min=DEFAULT_INTENSITY_MIN,
 ):
-    mask = (
+    roi_mask = (
         (points[:, 0] >= x_range[0])
         & (points[:, 0] < x_range[1])
         & (points[:, 1] >= y_range[0])
         & (points[:, 1] < y_range[1])
-        & (points[:, 2] >= z_min)
-        & (points[:, 3] >= intensity_min)
     )
-    return points[mask]
+    roi_points = points[roi_mask]
+    z_filtered_points = roi_points[roi_points[:, 2] >= z_min]
+    intensity_filtered_points = z_filtered_points[z_filtered_points[:, 3] >= intensity_min]
+    return {
+        "raw": points,
+        "roi": roi_points,
+        "z_filter": z_filtered_points,
+        "intensity_filter": intensity_filtered_points,
+    }
+
+
+def filter_obstacle_points(
+    points,
+    x_range=(0.0, 40.0),
+    y_range=(-20.0, 20.0),
+    z_min=DEFAULT_Z_MIN,
+    intensity_min=DEFAULT_INTENSITY_MIN,
+):
+    stages = split_obstacle_filter_stages(
+        points,
+        x_range=x_range,
+        y_range=y_range,
+        z_min=z_min,
+        intensity_min=intensity_min,
+    )
+    return stages["intensity_filter"]
 
 
 def _build_grid(points_xy, cell_size):
@@ -153,9 +180,37 @@ def cluster_to_oriented_box(cluster, det_id):
     }
 
 
-def detect_objects_from_points(points, eps=0.6, min_points=20, oriented=False):
-    obstacle_points = filter_obstacle_points(points)
+def detect_objects_from_points(
+    points,
+    eps=0.6,
+    min_points=20,
+    oriented=False,
+    z_min=DEFAULT_Z_MIN,
+    intensity_min=DEFAULT_INTENSITY_MIN,
+    return_trace=False,
+):
+    stages = split_obstacle_filter_stages(
+        points,
+        z_min=z_min,
+        intensity_min=intensity_min,
+    )
+    obstacle_points = stages["intensity_filter"]
     clusters = euclidean_cluster(obstacle_points, eps=eps, min_points=min_points)
     box_fn = cluster_to_oriented_box if oriented else cluster_to_box
     detections = [box_fn(cluster, idx + 1) for idx, cluster in enumerate(clusters)]
-    return detections
+    if not return_trace:
+        return detections
+
+    trace = {
+        "point_counts": {stage_name: int(len(stage_points)) for stage_name, stage_points in stages.items()},
+        "cluster_count": int(len(clusters)),
+        "cluster_point_counts": [int(len(cluster)) for cluster in clusters],
+        "parameters": {
+            "eps": float(eps),
+            "min_points": int(min_points),
+            "oriented": bool(oriented),
+            "z_min": float(z_min),
+            "intensity_min": float(intensity_min),
+        },
+    }
+    return detections, trace

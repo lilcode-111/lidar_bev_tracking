@@ -83,6 +83,76 @@ class FailureCategory(StableStrEnum):
     HIGHEST_EFFECTIVE_CAR_DETECTIONS = "highest_effective_car_detections"
 
 
+class FailureReason(StableStrEnum):
+    NO_RAW_POINTS_IN_GT = "no_raw_points_in_gt"
+    REMOVED_BY_ROI = "removed_by_roi"
+    REMOVED_BY_Z_FILTER = "removed_by_z_filter"
+    REMOVED_BY_INTENSITY_FILTER = "removed_by_intensity_filter"
+    INSUFFICIENT_POINTS_FOR_CLUSTERING = "insufficient_points_for_clustering"
+    CLUSTER_FRAGMENTATION = "cluster_fragmentation"
+    CLUSTER_MERGING = "cluster_merging"
+    REJECTED_BY_CAR_CLASSIFICATION = "rejected_by_car_classification"
+    REMOVED_BY_NMS = "removed_by_nms"
+    FINAL_IOU_BELOW_THRESHOLD = "final_iou_below_threshold"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass
+class FilterStageCounts:
+    raw: int = 0
+    roi: int = 0
+    z_filter: int = 0
+    intensity_filter: int = 0
+
+    def to_dict(self):
+        return {
+            "raw": int(self.raw),
+            "roi": int(self.roi),
+            "z_filter": int(self.z_filter),
+            "intensity_filter": int(self.intensity_filter),
+        }
+
+
+@dataclass
+class FailureEvidence:
+    frame_id: str
+    gt_id: str
+    primary_reason: FailureReason | str
+    stage_point_counts: FilterStageCounts | dict = field(default_factory=FilterStageCounts)
+    supporting_flags: list[FailureReason | str] = field(default_factory=list)
+    cluster_ids: list[str] = field(default_factory=list)
+    raw_detection_ids: list[str] = field(default_factory=list)
+    car_detection_ids_before_nms: list[str] = field(default_factory=list)
+    detection_ids_after_nms: list[str] = field(default_factory=list)
+    best_iou_before_nms: float | None = None
+    best_iou_after_nms: float | None = None
+    gt_box: dict = field(default_factory=dict)
+    source_run_id: str | None = None
+
+    def __post_init__(self):
+        self.primary_reason = FailureReason(self.primary_reason)
+        self.supporting_flags = [FailureReason(flag) for flag in self.supporting_flags]
+        if isinstance(self.stage_point_counts, dict):
+            self.stage_point_counts = FilterStageCounts(**self.stage_point_counts)
+
+    def to_dict(self):
+        return {
+            "frame_id": str(self.frame_id).zfill(6),
+            "gt_id": str(self.gt_id),
+            "primary_reason": self.primary_reason.value,
+            "stage_point_counts": self.stage_point_counts.to_dict(),
+            "supporting_flags": [flag.value for flag in self.supporting_flags],
+            "cluster_ids": [str(value) for value in self.cluster_ids],
+            "raw_detection_ids": [str(value) for value in self.raw_detection_ids],
+            "car_detection_ids_before_nms": [str(value) for value in self.car_detection_ids_before_nms],
+            "detection_ids_after_nms": [str(value) for value in self.detection_ids_after_nms],
+            "best_iou_before_nms": to_json_compatible(self.best_iou_before_nms),
+            "best_iou_after_nms": to_json_compatible(self.best_iou_after_nms),
+            "gt_box": to_json_compatible(self.gt_box),
+            "source_run_id": to_json_compatible(self.source_run_id),
+        }
+
+
 @dataclass
 class FailureCase:
     category: FailureCategory | str

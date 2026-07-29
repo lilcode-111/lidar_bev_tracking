@@ -486,6 +486,8 @@ def rebuild_batch_from_disk(summary, frame_results, requested_frame_ids, run_dir
         eps=parameters.get("eps", 0.6),
         min_points=parameters.get("min_points", 20),
         oriented=totals.get("box_mode") == "oriented_pca",
+        z_min=parameters.get("z_min", -0.9),
+        intensity_min=parameters.get("intensity_min", 0.38),
         nms_iou_threshold=parameters.get("nms_iou_threshold", 0.3),
         eval_iou_threshold=float(primary_iou_key),
         auxiliary_iou_thresholds=auxiliary_thresholds,

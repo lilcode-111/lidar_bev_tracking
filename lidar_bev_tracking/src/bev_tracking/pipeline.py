@@ -26,6 +26,8 @@ def run_kitti_frame_evaluation(
     nms_iou_threshold=0.3,
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     frame_id = str(frame_id).zfill(6)
     total_start = perf_counter()
@@ -186,6 +188,8 @@ def run_kitti_frame_evaluation(
             eps=eps,
             min_points=min_points,
             oriented=oriented,
+            z_min=z_min,
+            intensity_min=intensity_min,
         )
         detection_time_ms = elapsed_ms(detection_start)
     except Exception as exc:
@@ -279,6 +283,8 @@ def run_kitti_frame_evaluation(
             "parameters": {
                 "eps": float(eps),
                 "min_points": int(min_points),
+                "z_min": float(z_min),
+                "intensity_min": float(intensity_min),
                 "nms_iou_threshold": float(nms_iou_threshold),
                 "eval_iou_threshold": float(eval_iou_threshold),
                 "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
@@ -298,6 +304,8 @@ def run_kitti_bev_evaluation(
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
     report_dir="outputs/reports",
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     frame_result = run_kitti_frame_evaluation(
         data_root=data_root,
@@ -305,6 +313,8 @@ def run_kitti_bev_evaluation(
         eps=eps,
         min_points=min_points,
         oriented=oriented,
+        z_min=z_min,
+        intensity_min=intensity_min,
         nms_iou_threshold=nms_iou_threshold,
         eval_iou_threshold=eval_iou_threshold,
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
@@ -324,6 +334,8 @@ def run_kitti_bev_evaluation_from_config(config):
         eps=config["detector"]["eps"],
         min_points=config["detector"]["min_points"],
         oriented=config["detector"]["oriented"],
+        z_min=config["detector"].get("z_min", -0.9),
+        intensity_min=config["detector"].get("intensity_min", 0.38),
         nms_iou_threshold=config["nms"]["iou_threshold"],
         eval_iou_threshold=config["evaluation"]["iou_threshold"],
         auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),

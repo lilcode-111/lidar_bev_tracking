@@ -292,6 +292,8 @@ def rebuild_batch_after_report_write(batch_result, frame_results, run_id, starte
         eps=parameters.get("eps", 0.6),
         min_points=parameters.get("min_points", 20),
         oriented=batch_result.totals.get("box_mode") == "oriented_pca",
+        z_min=parameters.get("z_min", -0.9),
+        intensity_min=parameters.get("intensity_min", 0.38),
         nms_iou_threshold=parameters.get("nms_iou_threshold", 0.3),
         eval_iou_threshold=parameters.get("eval_iou_threshold", 0.5),
         auxiliary_iou_thresholds=parameters.get("auxiliary_iou_thresholds", [0.25]),

@@ -20,6 +20,8 @@ def run_kitti_batch_evaluation(
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
     report_dir="outputs/reports",
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     frame_ids = normalize_frame_ids(frame_ids)
     frame_results = run_kitti_batch_frame_results(
@@ -28,6 +30,8 @@ def run_kitti_batch_evaluation(
         eps=eps,
         min_points=min_points,
         oriented=oriented,
+        z_min=z_min,
+        intensity_min=intensity_min,
         nms_iou_threshold=nms_iou_threshold,
         eval_iou_threshold=eval_iou_threshold,
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
@@ -45,6 +49,8 @@ def run_kitti_batch_evaluation(
         eps=eps,
         min_points=min_points,
         oriented=oriented,
+        z_min=z_min,
+        intensity_min=intensity_min,
         nms_iou_threshold=nms_iou_threshold,
         eval_iou_threshold=eval_iou_threshold,
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
@@ -68,6 +74,8 @@ def run_kitti_batch_frame_results(
     nms_iou_threshold=0.3,
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     frame_results = []
     for frame_id in normalize_frame_ids(frame_ids):
@@ -84,6 +92,8 @@ def run_kitti_batch_frame_results(
                     eps=eps,
                     min_points=min_points,
                     oriented=oriented,
+                    z_min=z_min,
+                    intensity_min=intensity_min,
                     nms_iou_threshold=nms_iou_threshold,
                     eval_iou_threshold=eval_iou_threshold,
                     auxiliary_iou_thresholds=auxiliary_iou_thresholds,
@@ -104,6 +114,8 @@ def run_kitti_batch_result(
     nms_iou_threshold=0.3,
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     frame_ids = normalize_frame_ids(frame_ids)
     frame_results = run_kitti_batch_frame_results(
@@ -112,6 +124,8 @@ def run_kitti_batch_result(
         eps=eps,
         min_points=min_points,
         oriented=oriented,
+        z_min=z_min,
+        intensity_min=intensity_min,
         nms_iou_threshold=nms_iou_threshold,
         eval_iou_threshold=eval_iou_threshold,
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
@@ -123,6 +137,8 @@ def run_kitti_batch_result(
         eps=eps,
         min_points=min_points,
         oriented=oriented,
+        z_min=z_min,
+        intensity_min=intensity_min,
         nms_iou_threshold=nms_iou_threshold,
         eval_iou_threshold=eval_iou_threshold,
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
@@ -139,6 +155,8 @@ def build_batch_result(
     nms_iou_threshold=0.3,
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     frame_ids = normalize_frame_ids(frame_ids) if frame_ids is not None else [result.frame_id for result in frame_results]
     iou_keys = metric_keys(eval_iou_threshold, auxiliary_iou_thresholds)
@@ -159,6 +177,8 @@ def build_batch_result(
             "parameters": {
                 "eps": float(eps),
                 "min_points": int(min_points),
+                "z_min": float(z_min),
+                "intensity_min": float(intensity_min),
                 "nms_iou_threshold": float(nms_iou_threshold),
                 "eval_iou_threshold": float(eval_iou_threshold),
                 "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
@@ -362,6 +382,8 @@ def run_kitti_batch_evaluation_from_config(config):
         eps=config["detector"]["eps"],
         min_points=config["detector"]["min_points"],
         oriented=config["detector"]["oriented"],
+        z_min=config["detector"].get("z_min", -0.9),
+        intensity_min=config["detector"].get("intensity_min", 0.38),
         nms_iou_threshold=config["nms"]["iou_threshold"],
         eval_iou_threshold=config["evaluation"]["iou_threshold"],
         auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
@@ -383,6 +405,8 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
         eps=config["detector"]["eps"],
         min_points=config["detector"]["min_points"],
         oriented=config["detector"]["oriented"],
+        z_min=config["detector"].get("z_min", -0.9),
+        intensity_min=config["detector"].get("intensity_min", 0.38),
         nms_iou_threshold=config["nms"]["iou_threshold"],
         eval_iou_threshold=config["evaluation"]["iou_threshold"],
         auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
@@ -436,6 +460,8 @@ def summarize_batch_reports(
     nms_iou_threshold,
     eval_iou_threshold,
     auxiliary_iou_thresholds,
+    z_min=-0.9,
+    intensity_min=0.38,
 ):
     total_points = 0
     total_gt_boxes = 0
@@ -464,6 +490,8 @@ def summarize_batch_reports(
         "parameters": {
             "eps": float(eps),
             "min_points": int(min_points),
+            "z_min": float(z_min),
+            "intensity_min": float(intensity_min),
             "nms_iou_threshold": float(nms_iou_threshold),
             "eval_iou_threshold": float(eval_iou_threshold),
             "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
