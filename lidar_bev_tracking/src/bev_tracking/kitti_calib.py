@@ -44,11 +44,14 @@ def _to_homogeneous_4x4(matrix):
 
 
 def camera_rect_to_lidar_matrix(calib):
+    return np.linalg.inv(lidar_to_camera_rect_matrix(calib))
+
+
+def lidar_to_camera_rect_matrix(calib):
     r0 = np.eye(4, dtype=np.float32)
     r0[:3, :3] = calib["R0_rect"]
     tr_velo_to_cam = _to_homogeneous_4x4(calib["Tr_velo_to_cam"])
-    velo_to_rect = r0 @ tr_velo_to_cam
-    return np.linalg.inv(velo_to_rect)
+    return r0 @ tr_velo_to_cam
 
 
 def transform_points(points, transform):
@@ -59,6 +62,20 @@ def transform_points(points, transform):
 
 def has_valid_3d_box(label):
     return label["height"] > 0.0 and label["width"] > 0.0 and label["length"] > 0.0
+
+
+def camera_rotation_y_to_lidar_yaw(rotation_y, calib):
+    cam_to_lidar = camera_rect_to_lidar_matrix(calib)
+    heading_cam = np.asarray([[np.sin(rotation_y), 0.0, np.cos(rotation_y)]], dtype=np.float32)
+    heading_lidar = heading_cam @ cam_to_lidar[:3, :3].T
+    return float(np.arctan2(heading_lidar[0, 1], heading_lidar[0, 0]))
+
+
+def lidar_yaw_to_camera_rotation_y(yaw, calib):
+    lidar_to_cam = lidar_to_camera_rect_matrix(calib)
+    heading_lidar = np.asarray([[np.cos(yaw), np.sin(yaw), 0.0]], dtype=np.float32)
+    heading_cam = heading_lidar @ lidar_to_cam[:3, :3].T
+    return float(np.arctan2(heading_cam[0, 0], heading_cam[0, 2]))
 
 
 def kitti_labels_to_lidar_boxes(labels, calib):
@@ -78,9 +95,7 @@ def kitti_labels_to_lidar_boxes(labels, calib):
         center_cam = np.asarray([[x_cam, y_cam - height / 2.0, z_cam]], dtype=np.float32)
         center_lidar = transform_points(center_cam, cam_to_lidar)[0]
 
-        heading_cam = np.asarray([[np.sin(rotation_y), 0.0, np.cos(rotation_y)]], dtype=np.float32)
-        heading_lidar = heading_cam @ cam_to_lidar[:3, :3].T
-        yaw = float(np.arctan2(heading_lidar[0, 1], heading_lidar[0, 0]))
+        yaw = camera_rotation_y_to_lidar_yaw(rotation_y, calib)
 
         boxes.append(
             {
@@ -91,6 +106,7 @@ def kitti_labels_to_lidar_boxes(labels, calib):
                 "z": float(center_lidar[2]),
                 "length": float(length),
                 "width": float(width),
+                "height": float(height),
                 "yaw": yaw,
                 "source": "kitti_label",
             }
