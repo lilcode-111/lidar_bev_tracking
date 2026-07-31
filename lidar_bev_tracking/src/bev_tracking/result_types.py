@@ -126,6 +126,9 @@ class FailureEvidence:
     detection_ids_after_nms: list[str] = field(default_factory=list)
     best_iou_before_nms: float | None = None
     best_iou_after_nms: float | None = None
+    best_detection_before_nms: dict | None = None
+    best_detection_after_nms: dict | None = None
+    geometry_delta_after_nms: dict = field(default_factory=dict)
     gt_box: dict = field(default_factory=dict)
     source_run_id: str | None = None
 
@@ -148,6 +151,9 @@ class FailureEvidence:
             "detection_ids_after_nms": [str(value) for value in self.detection_ids_after_nms],
             "best_iou_before_nms": to_json_compatible(self.best_iou_before_nms),
             "best_iou_after_nms": to_json_compatible(self.best_iou_after_nms),
+            "best_detection_before_nms": to_json_compatible(self.best_detection_before_nms),
+            "best_detection_after_nms": to_json_compatible(self.best_detection_after_nms),
+            "geometry_delta_after_nms": to_json_compatible(self.geometry_delta_after_nms),
             "gt_box": to_json_compatible(self.gt_box),
             "source_run_id": to_json_compatible(self.source_run_id),
         }

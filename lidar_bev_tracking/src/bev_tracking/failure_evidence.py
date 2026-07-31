@@ -1,5 +1,7 @@
 from collections import Counter
 
+import numpy as np
+
 from bev_tracking.clustering_detector import (
     cluster_to_box,
     cluster_to_oriented_box,
@@ -129,8 +131,8 @@ def build_gt_failure_evidence(
 
     positive_raw = [det for det in raw_detections if is_positive_detection(det)]
     positive_after_nms = [det for det in detections_after_nms if is_positive_detection(det)]
-    best_iou_before_nms = best_iou(gt_box, positive_raw)
-    best_iou_after_nms = best_iou(gt_box, positive_after_nms)
+    best_iou_before_nms, best_detection_before_nms = best_iou_candidate(gt_box, positive_raw)
+    best_iou_after_nms, best_detection_after_nms = best_iou_candidate(gt_box, positive_after_nms)
 
     conditions = failure_conditions(
         gt_box=gt_box,
@@ -158,6 +160,9 @@ def build_gt_failure_evidence(
         detection_ids_after_nms=[det["id"] for det in associated_after_nms],
         best_iou_before_nms=best_iou_before_nms,
         best_iou_after_nms=best_iou_after_nms,
+        best_detection_before_nms=detection_snapshot(best_detection_before_nms),
+        best_detection_after_nms=detection_snapshot(best_detection_after_nms),
+        geometry_delta_after_nms=box_geometry_delta(gt_box, best_detection_after_nms),
         gt_box=gt_box,
         source_run_id=source_run_id,
     )
@@ -221,7 +226,43 @@ def unique_reasons(reasons):
     return output
 
 
-def best_iou(gt_box, detections):
+def best_iou_candidate(gt_box, detections):
     if not detections:
-        return 0.0
-    return float(max(bev_iou(gt_box, det) for det in detections))
+        return 0.0, None
+
+    ranked = sorted(
+        ((float(bev_iou(gt_box, det)), det) for det in detections),
+        key=lambda item: (
+            -item[0],
+            int(item[1].get("det_index", 0)),
+            str(item[1].get("id", "")),
+        ),
+    )
+    return ranked[0]
+
+
+def detection_snapshot(detection):
+    if detection is None:
+        return None
+    fields = ["id", "class_name", "x", "y", "z", "length", "width", "yaw", "score", "num_points", "det_index"]
+    return {field: detection[field] for field in fields if field in detection}
+
+
+def box_geometry_delta(gt_box, detection):
+    if detection is None:
+        return {}
+
+    dx = float(detection["x"] - gt_box["x"])
+    dy = float(detection["y"] - gt_box["y"])
+    return {
+        "dx_m": dx,
+        "dy_m": dy,
+        "center_error_m": float(np.hypot(dx, dy)),
+        "length_error_m": float(detection["length"] - gt_box["length"]),
+        "width_error_m": float(detection["width"] - gt_box["width"]),
+        "yaw_error_rad": box_yaw_error(detection["yaw"], gt_box["yaw"]),
+    }
+
+
+def box_yaw_error(yaw_a, yaw_b):
+    return float(abs((float(yaw_a) - float(yaw_b) + np.pi / 2.0) % np.pi - np.pi / 2.0))
