@@ -66,7 +66,7 @@ def has_valid_3d_box(label):
 
 def camera_rotation_y_to_lidar_yaw(rotation_y, calib):
     cam_to_lidar = camera_rect_to_lidar_matrix(calib)
-    heading_cam = np.asarray([[np.sin(rotation_y), 0.0, np.cos(rotation_y)]], dtype=np.float32)
+    heading_cam = np.asarray([[np.cos(rotation_y), 0.0, -np.sin(rotation_y)]], dtype=np.float32)
     heading_lidar = heading_cam @ cam_to_lidar[:3, :3].T
     return float(np.arctan2(heading_lidar[0, 1], heading_lidar[0, 0]))
 
@@ -75,7 +75,7 @@ def lidar_yaw_to_camera_rotation_y(yaw, calib):
     lidar_to_cam = lidar_to_camera_rect_matrix(calib)
     heading_lidar = np.asarray([[np.cos(yaw), np.sin(yaw), 0.0]], dtype=np.float32)
     heading_cam = heading_lidar @ lidar_to_cam[:3, :3].T
-    return float(np.arctan2(heading_cam[0, 0], heading_cam[0, 2]))
+    return float(np.arctan2(-heading_cam[0, 2], heading_cam[0, 0]))
 
 
 def kitti_labels_to_lidar_boxes(labels, calib):

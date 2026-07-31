@@ -98,7 +98,7 @@ class FailureEvidenceReplayTest(unittest.TestCase):
 
         evidence = report["failure_evidence"][0]
         self.assertEqual(evidence["primary_reason"], "insufficient_points_for_clustering")
-        self.assertIn("final_iou_below_threshold", evidence["supporting_flags"])
+        self.assertNotIn("final_iou_below_threshold", evidence["supporting_flags"])
 
     def test_report_is_json_serializable_and_counts_reasons(self):
         report = build_failure_evidence_report(

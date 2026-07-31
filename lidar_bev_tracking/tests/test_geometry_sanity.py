@@ -74,7 +74,7 @@ class GeometrySanityTest(unittest.TestCase):
         self.assertAlmostEqual(box["length"], 4.5)
         self.assertAlmostEqual(box["width"], 1.9)
         self.assertAlmostEqual(box["height"], 1.5)
-        self.assertAlmostEqual(box["yaw"], 0.0)
+        self.assertAlmostEqual(box["yaw"], -np.pi / 2.0)
 
     def test_oriented_3d_point_in_box_respects_yaw_and_height(self):
         box = {
@@ -115,7 +115,7 @@ class GeometrySanityTest(unittest.TestCase):
         points = np.asarray(
             [
                 [12.0, -3.0, 0.0, 0.8],
-                [13.0, -3.0, 0.0, 0.7],
+                [12.0, -4.0, 0.0, 0.7],
                 [30.0, 10.0, 0.0, 0.4],
             ],
             dtype=np.float32,

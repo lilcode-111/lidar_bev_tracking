@@ -212,7 +212,7 @@ def failure_conditions(
 
     if stage_counts.intensity_filter < min_points:
         conditions.append(FailureReason.INSUFFICIENT_POINTS_FOR_CLUSTERING)
-    if best_iou_after_nms < eval_iou_threshold:
+    if 0.0 < best_iou_after_nms < eval_iou_threshold:
         conditions.append(FailureReason.FINAL_IOU_BELOW_THRESHOLD)
 
     return unique_reasons(conditions)
