@@ -47,3 +47,5 @@ PYTHONPATH=src python scripts/run_kitti_yaw_semantic_check.py \
 - 角点默认容差为 `0.001m`，用于覆盖真实标定矩阵和 `float32` 运算产生的亚毫米误差。
 
 修复确认后，需要重新运行固定 25 帧 FailureEvidence 和固定 100 帧 A0。旧报告因 GT 朝向错误而失效，不能继续用于算法 A/B。
+
+同时收紧 FailureEvidence 的低 IoU supporting flag：只有 NMS 后候选框与 GT 存在正 BEV IoU，且 IoU 低于评测阈值时，才标记 `final_iou_below_threshold`。没有重叠候选框的上游失败不再被误标为最终定位失败。
