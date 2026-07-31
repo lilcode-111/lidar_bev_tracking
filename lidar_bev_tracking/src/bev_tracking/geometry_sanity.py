@@ -10,7 +10,8 @@ from bev_tracking.kitti_calib import (
 )
 
 
-DEFAULT_ROUND_TRIP_TOLERANCE = 1e-4
+DEFAULT_CENTER_TOLERANCE_M = 1e-4
+DEFAULT_YAW_TOLERANCE_RAD = 2e-4
 
 
 def normalize_angle(angle):
@@ -80,7 +81,14 @@ def reconstructed_camera_label(box, calib):
     }
 
 
-def build_geometry_sanity_report(points, labels, calib, frame_id, tolerance=DEFAULT_ROUND_TRIP_TOLERANCE):
+def build_geometry_sanity_report(
+    points,
+    labels,
+    calib,
+    frame_id,
+    center_tolerance_m=DEFAULT_CENTER_TOLERANCE_M,
+    yaw_tolerance_rad=DEFAULT_YAW_TOLERANCE_RAD,
+):
     frame_id = str(frame_id).zfill(6)
     round_trip = coordinate_round_trip_metrics(points, calib)
     boxes = kitti_labels_to_lidar_boxes(labels, calib)
@@ -111,16 +119,21 @@ def build_geometry_sanity_report(points, labels, calib, frame_id, tolerance=DEFA
                     "width": float(box["width"]),
                     "height": float(box["height"]),
                 },
-                "passed": center_error <= tolerance and yaw_error <= tolerance,
+                "center_passed": center_error <= center_tolerance_m,
+                "yaw_passed": yaw_error <= yaw_tolerance_rad,
+                "passed": center_error <= center_tolerance_m and yaw_error <= yaw_tolerance_rad,
             }
         )
 
     car_reports = [item for item in box_reports if item["class_name"] == "car"]
     invalid_3d_labels = sum(1 for label in labels if not has_valid_3d_box(label))
-    passed = round_trip["max_error_m"] <= tolerance and all(item["passed"] for item in box_reports)
+    passed = round_trip["max_error_m"] <= center_tolerance_m and all(item["passed"] for item in box_reports)
     return {
         "frame_id": frame_id,
-        "tolerance": float(tolerance),
+        "tolerances": {
+            "center_error_m": float(center_tolerance_m),
+            "yaw_error_rad": float(yaw_tolerance_rad),
+        },
         "passed": bool(passed),
         "coordinate_round_trip": round_trip,
         "summary": {

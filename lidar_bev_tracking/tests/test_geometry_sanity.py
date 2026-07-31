@@ -135,6 +135,21 @@ class GeometrySanityTest(unittest.TestCase):
         self.assertEqual(report["boxes"][0]["points_in_box"], 2)
         json.dumps(report)
 
+    def test_center_and_yaw_tolerances_are_independent(self):
+        report = build_geometry_sanity_report(
+            np.asarray([[12.0, -3.0, 0.0, 0.8]], dtype=np.float32),
+            [car_label()],
+            standard_test_calib(),
+            frame_id="317",
+            center_tolerance_m=1e-12,
+            yaw_tolerance_rad=1e-3,
+        )
+
+        self.assertEqual(report["tolerances"]["center_error_m"], 1e-12)
+        self.assertEqual(report["tolerances"]["yaw_error_rad"], 1e-3)
+        self.assertIn("center_passed", report["boxes"][0])
+        self.assertIn("yaw_passed", report["boxes"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

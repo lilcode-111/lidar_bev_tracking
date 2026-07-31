@@ -2,7 +2,11 @@ import argparse
 import json
 from pathlib import Path
 
-from bev_tracking.geometry_sanity import DEFAULT_ROUND_TRIP_TOLERANCE, build_geometry_sanity_report
+from bev_tracking.geometry_sanity import (
+    DEFAULT_CENTER_TOLERANCE_M,
+    DEFAULT_YAW_TOLERANCE_RAD,
+    build_geometry_sanity_report,
+)
 from bev_tracking.kitti import (
     load_kitti_labels,
     load_kitti_point_cloud,
@@ -18,10 +22,16 @@ def parse_args():
     parser.add_argument("--frame-id", default="000000", help="KITTI frame id.")
     parser.add_argument("--output-dir", default="outputs/geometry_sanity", help="Directory for JSON reports.")
     parser.add_argument(
-        "--tolerance",
+        "--center-tolerance-m",
         type=float,
-        default=DEFAULT_ROUND_TRIP_TOLERANCE,
-        help="Maximum coordinate and yaw round-trip error.",
+        default=DEFAULT_CENTER_TOLERANCE_M,
+        help="Maximum coordinate center round-trip error in meters.",
+    )
+    parser.add_argument(
+        "--yaw-tolerance-rad",
+        type=float,
+        default=DEFAULT_YAW_TOLERANCE_RAD,
+        help="Maximum yaw round-trip error in radians.",
     )
     return parser.parse_args()
 
@@ -40,7 +50,8 @@ def main():
         labels,
         calib,
         frame_id=frame_id,
-        tolerance=args.tolerance,
+        center_tolerance_m=args.center_tolerance_m,
+        yaw_tolerance_rad=args.yaw_tolerance_rad,
     )
 
     output_dir = Path(args.output_dir)
