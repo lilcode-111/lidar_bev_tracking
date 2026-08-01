@@ -1,0 +1,82 @@
+{
+  "schema_version": "15.1",
+  "baseline_id": "A0_prime_geometry_corrected",
+  "status": "frozen",
+  "role": "unique_algorithm_experiment_baseline",
+  "declared_at": "2026-08-01",
+  "supersedes": {
+    "baseline_id": "A0_pre_geometry_fix",
+    "status": "audit_only",
+    "reason": "KITTI rotation_y used the object local z axis instead of the length axis"
+  },
+  "source_run": {
+    "run_id": "20260731T155421Z_kitti_car_batch_e38a8c35",
+    "run_directory": "outputs/kitti_batch_eval/20260731T155421Z_kitti_car_batch_e38a8c35",
+    "batch_status": "success",
+    "git_commit": "e31ae77990c38888ca2316da379a87f1e904eac9",
+    "git_dirty": false,
+    "config_hash": "e38a8c3591c29b1241b84576dd74d8d76df8395769e515e0c5d6d2e9ed3a5647",
+    "num_frames": 100,
+    "metric_valid_frames": 100,
+    "failed_frames": 0,
+    "skipped_frames": 0
+  },
+  "dataset": {
+    "data_root": "data/kitti/real_100",
+    "frame_manifest_path": "configs/kitti_100_frames.txt",
+    "frame_manifest_sha256": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19",
+    "diagnostic_manifest_path": "configs/kitti_diagnostic_frames.txt",
+    "diagnostic_manifest_sha256": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+    "diagnostic_num_frames": 25
+  },
+  "algorithm_config": {
+    "detector": {
+      "eps": 0.6,
+      "min_points": 20,
+      "oriented": true,
+      "z_min": -0.9,
+      "intensity_min": 0.38
+    },
+    "nms": {
+      "iou_threshold": 0.3
+    },
+    "evaluation": {
+      "policy_version": "12.1",
+      "primary_iou_threshold": 0.5,
+      "auxiliary_iou_thresholds": [0.25],
+      "neutral_iou_threshold": 0.5
+    },
+    "roi": {
+      "x": [0.0, 40.0],
+      "y": [-20.0, 20.0],
+      "boundary": "left_closed_right_open"
+    }
+  },
+  "metrics_by_iou": {
+    "0.50": {
+      "tp": 4,
+      "fp": 483,
+      "fn": 318,
+      "precision": 0.008213552361396304,
+      "recall": 0.012422360248447204,
+      "f1": 0.009888751545117428,
+      "neutralized_detections": 3
+    },
+    "0.25": {
+      "tp": 12,
+      "fp": 475,
+      "fn": 310,
+      "precision": 0.024640657084188913,
+      "recall": 0.037267080745341616,
+      "f1": 0.029666254635352288,
+      "neutralized_detections": 3
+    }
+  },
+  "totals": {
+    "num_positive_gt": 322,
+    "num_raw_detections": 1430,
+    "num_car_detections_before_nms": 490,
+    "effective_car_detection_count_iou_0_50": 490,
+    "effective_car_detection_count_iou_0_25": 490
+  }
+}

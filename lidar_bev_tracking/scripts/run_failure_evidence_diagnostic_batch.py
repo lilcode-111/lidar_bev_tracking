@@ -2,8 +2,12 @@ import argparse
 from pathlib import Path
 
 from bev_tracking.failure_evidence_batch import (
-    load_diagnostic_frame_ids,
+    load_diagnostic_manifest,
     run_kitti_diagnostic_failure_evidence,
+)
+from bev_tracking.kitti_yaw_validation import (
+    DEFAULT_CORNER_TOLERANCE_M,
+    DEFAULT_YAW_SEMANTIC_TOLERANCE_RAD,
 )
 from bev_tracking.report_writer import atomic_write_json
 
@@ -21,6 +25,12 @@ def parse_args():
     parser.add_argument("--eval-iou-threshold", type=float, default=0.5)
     parser.add_argument("--center-tolerance-m", type=float, default=0.0001)
     parser.add_argument("--yaw-tolerance-rad", type=float, default=0.0002)
+    parser.add_argument(
+        "--yaw-semantic-tolerance-rad",
+        type=float,
+        default=DEFAULT_YAW_SEMANTIC_TOLERANCE_RAD,
+    )
+    parser.add_argument("--corner-tolerance-m", type=float, default=DEFAULT_CORNER_TOLERANCE_M)
     parser.add_argument("--oriented", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--source-run-id")
     return parser.parse_args()
@@ -28,10 +38,10 @@ def parse_args():
 
 def main():
     args = parse_args()
-    frame_ids = load_diagnostic_frame_ids(args.manifest)
+    manifest = load_diagnostic_manifest(args.manifest)
     report = run_kitti_diagnostic_failure_evidence(
         data_root=args.data_root,
-        frame_ids=frame_ids,
+        frame_ids=manifest["frame_ids"],
         eps=args.eps,
         min_points=args.min_points,
         oriented=args.oriented,
@@ -41,6 +51,9 @@ def main():
         eval_iou_threshold=args.eval_iou_threshold,
         center_tolerance_m=args.center_tolerance_m,
         yaw_tolerance_rad=args.yaw_tolerance_rad,
+        yaw_semantic_tolerance_rad=args.yaw_semantic_tolerance_rad,
+        corner_tolerance_m=args.corner_tolerance_m,
+        manifest_metadata=manifest,
         source_run_id=args.source_run_id,
         progress_callback=lambda index, total, frame_id: print(f"[{index:02d}/{total:02d}] replay {frame_id}"),
     )
@@ -52,6 +65,13 @@ def main():
     print(f'positive GT: {summary["num_positive_gt"]}')
     print(f'false negatives: {summary["num_false_negatives"]}')
     print(f'primary reasons: {summary["primary_reason_counts"]}')
+    for metric_name, metric in summary["geometry_errors"].items():
+        worst = metric["worst_object"]
+        worst_id = f'{worst["frame_id"]}/{worst["gt_id"]}' if worst is not None else "none"
+        print(
+            f'{metric_name}: mean={metric["mean"]} max={metric["max"]} '
+            f'tolerance={metric["tolerance"]} worst={worst_id}'
+        )
     print(f"saved {output_path}")
     return 0 if summary["geometry_failed_frames"] == 0 else 1
 

@@ -67,6 +67,22 @@ class KittiYawSemanticTest(unittest.TestCase):
 
         self.assertLessEqual(unordered_corner_error(reference_corners, actual_corners), 1e-5)
 
+    def test_multiple_directions_match_independent_yaw_and_corner_reference(self):
+        calib = standard_test_calib()
+        rotation_values = [-np.pi + 0.01, -np.pi / 2.0, -0.4, 0.0, 0.4, np.pi / 2.0, np.pi - 0.01]
+
+        for rotation_y in rotation_values:
+            with self.subTest(rotation_y=rotation_y):
+                expected_yaw = reference_camera_rotation_y_to_lidar_yaw(rotation_y, calib)
+                actual_yaw = camera_rotation_y_to_lidar_yaw(rotation_y, calib)
+                self.assertLessEqual(angle_error(expected_yaw, actual_yaw), 1e-6)
+
+                label = car_label(rotation_y=rotation_y)
+                box = kitti_labels_to_lidar_boxes([label], calib)[0]
+                reference_corners = reference_kitti_box_corners_in_lidar(label, calib)
+                actual_corners = box_corners_bev(box)
+                self.assertLessEqual(unordered_corner_error(reference_corners, actual_corners), 1e-5)
+
 
 if __name__ == "__main__":
     unittest.main()
