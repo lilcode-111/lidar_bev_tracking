@@ -1,0 +1,24 @@
+data:
+  root: data/kitti/real_100
+  manifest: configs/kitti_diagnostic_frames.txt
+
+detector:
+  eps: 0.6
+  min_points: 20
+  oriented: true
+  z_min: -0.9
+  intensity_min: 0.0
+
+nms:
+  iou_threshold: 0.3
+
+evaluation:
+  iou_threshold: 0.5
+  auxiliary_iou_thresholds:
+  - 0.25
+
+geometry:
+  center_tolerance_m: 0.0001
+  yaw_tolerance_rad: 0.0002
+  yaw_semantic_tolerance_rad: 0.0001
+  corner_tolerance_m: 0.001

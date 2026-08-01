@@ -16,7 +16,7 @@ from bev_tracking.nms import nms_bev
 from bev_tracking.result_types import FailureEvidence, FailureReason, FilterStageCounts
 
 
-FAILURE_EVIDENCE_SCHEMA_VERSION = "15.0"
+FAILURE_EVIDENCE_SCHEMA_VERSION = "15.1"
 
 
 def build_failure_evidence_report(
@@ -30,6 +30,7 @@ def build_failure_evidence_report(
     intensity_min=0.38,
     nms_iou_threshold=0.3,
     eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
     source_run_id=None,
 ):
     frame_id = str(frame_id).zfill(6)
@@ -46,7 +47,7 @@ def build_failure_evidence_report(
         detections_after_nms,
         gt_boxes,
         iou_threshold=eval_iou_threshold,
-        auxiliary_iou_thresholds=[],
+        auxiliary_iou_thresholds=auxiliary_iou_thresholds,
     )
 
     positive_gt = [box for box in gt_boxes if classify_gt_box(box) == "positive"]
@@ -76,6 +77,9 @@ def build_failure_evidence_report(
         for gt_id in false_negative_ids
     ]
     reason_counts = Counter(item.primary_reason.value for item in evidence)
+    metrics_by_iou = evaluation_metrics_by_iou(evaluation)
+    stage_point_counts = {stage_name: int(len(stage_points)) for stage_name, stage_points in stages.items()}
+    car_detections_before_nms = [det for det in raw_detections if is_positive_detection(det)]
 
     return {
         "schema_version": FAILURE_EVIDENCE_SCHEMA_VERSION,
@@ -88,17 +92,40 @@ def build_failure_evidence_report(
             "intensity_min": float(intensity_min),
             "nms_iou_threshold": float(nms_iou_threshold),
             "eval_iou_threshold": float(eval_iou_threshold),
+            "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
         },
         "summary": {
+            "stage_point_counts": stage_point_counts,
+            "z_to_intensity_identical": bool(np.array_equal(stages["z_filter"], stages["intensity_filter"])),
             "num_positive_gt": int(len(positive_gt)),
             "num_false_negatives": int(len(false_negative_ids)),
             "num_clusters": int(len(clusters)),
             "num_raw_detections": int(len(raw_detections)),
+            "num_car_detections_before_nms": int(len(car_detections_before_nms)),
             "num_detections_after_nms": int(len(detections_after_nms)),
+            "metrics_by_iou": metrics_by_iou,
             "primary_reason_counts": dict(sorted(reason_counts.items())),
         },
         "failure_evidence": [item.to_dict() for item in evidence],
     }
+
+
+def evaluation_metrics_by_iou(evaluation):
+    outputs = {
+        f'{evaluation["iou_threshold"]:.2f}': evaluation_metrics(evaluation),
+    }
+    for iou_key, auxiliary in evaluation.get("auxiliary", {}).items():
+        outputs[iou_key] = evaluation_metrics(auxiliary)
+    return outputs
+
+
+def evaluation_metrics(evaluation):
+    metrics = dict(evaluation["metrics"])
+    metrics["neutralized_detections"] = int(len(evaluation.get("neutralized_detections", [])))
+    metrics["effective_car_detection_count"] = int(
+        metrics["tp"] + metrics["fp"] + metrics["neutralized_detections"]
+    )
+    return metrics
 
 
 def build_gt_failure_evidence(

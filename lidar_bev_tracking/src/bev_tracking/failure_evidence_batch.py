@@ -22,7 +22,7 @@ from bev_tracking.kitti_yaw_validation import (
 )
 
 
-FAILURE_EVIDENCE_BATCH_SCHEMA_VERSION = "15.0"
+FAILURE_EVIDENCE_BATCH_SCHEMA_VERSION = "15.1"
 
 
 def load_diagnostic_frame_ids(manifest_path):
@@ -59,6 +59,7 @@ def run_kitti_diagnostic_failure_evidence(
     intensity_min=0.38,
     nms_iou_threshold=0.3,
     eval_iou_threshold=0.5,
+    auxiliary_iou_thresholds=(0.25,),
     center_tolerance_m=DEFAULT_CENTER_TOLERANCE_M,
     yaw_tolerance_rad=DEFAULT_YAW_TOLERANCE_RAD,
     yaw_semantic_tolerance_rad=DEFAULT_YAW_SEMANTIC_TOLERANCE_RAD,
@@ -110,6 +111,7 @@ def run_kitti_diagnostic_failure_evidence(
             intensity_min=intensity_min,
             nms_iou_threshold=nms_iou_threshold,
             eval_iou_threshold=eval_iou_threshold,
+            auxiliary_iou_thresholds=auxiliary_iou_thresholds,
             source_run_id=source_run_id,
         )
         frame_reports.append(
