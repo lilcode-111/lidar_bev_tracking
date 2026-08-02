@@ -7,6 +7,13 @@ from bev_tracking.failure_evidence_batch import run_kitti_diagnostic_failure_evi
 INTENSITY_DIAGNOSTIC_SCHEMA_VERSION = "15.1"
 REQUIRED_IOU_KEYS = ("0.50", "0.25")
 ALLOWED_CONFIG_DIFFERENCE = "detector.intensity_min"
+DISTANCE_BIN_ORDER = ("near_0_15", "mid_15_30", "far_30_inf")
+ZERO_CANDIDATE_OUTCOMES = (
+    "no_cluster",
+    "cluster_without_raw_detection",
+    "raw_detection_rejected_as_non_car",
+    "car_candidate_removed_by_nms",
+)
 
 
 class IntensityDiagnosticError(ValueError):
@@ -260,6 +267,10 @@ def build_intensity_comparison(
     i1_invariants,
     i0_reproduction,
 ):
+    per_frame_analysis = build_per_frame_change_analysis(i0_report, i1_report)
+    distance_analysis = build_distance_analysis(i0_report, i1_report)
+    gt_incremental_analysis = build_gt_incremental_analysis(i0_report, i1_report)
+    zero_detection_analysis = build_zero_detection_analysis(i0_invariants, i1_invariants)
     return {
         "schema_version": INTENSITY_DIAGNOSTIC_SCHEMA_VERSION,
         "experiment": "I0_vs_I1_intensity_filter_diagnostic",
@@ -300,7 +311,341 @@ def build_intensity_comparison(
                 "delta": int(i1_invariants["candidate_coverage"]["zero_car_candidate_gt_count"])
                 - int(i0_invariants["candidate_coverage"]["zero_car_candidate_gt_count"]),
             },
+            "zero_detection_gt": zero_detection_analysis,
+            "per_frame_analysis": per_frame_analysis,
+            "distance_analysis": distance_analysis,
+            "gt_incremental_analysis": gt_incremental_analysis,
         },
+    }
+
+
+def build_per_frame_change_analysis(i0_report, i1_report, top_k=5):
+    i0_frames = index_frame_reports(i0_report)
+    i1_frames = index_frame_reports(i1_report)
+    require_same_keys(i0_frames, i1_frames, "frame reports")
+    frame_ids = sorted(i0_frames)
+    frame_changes = []
+
+    for frame_id in frame_ids:
+        i0_summary = i0_frames[frame_id]["failure_evidence"]["summary"]
+        i1_summary = i1_frames[frame_id]["failure_evidence"]["summary"]
+        metrics_by_iou = {
+            iou_key: selected_value_comparison(
+                i0_summary["metrics_by_iou"][iou_key],
+                i1_summary["metrics_by_iou"][iou_key],
+                ("tp", "fp", "fn", "neutralized_detections", "effective_car_detection_count"),
+            )
+            for iou_key in REQUIRED_IOU_KEYS
+        }
+        reason_changes = value_comparison(
+            i0_summary.get("primary_reason_counts", {}),
+            i1_summary.get("primary_reason_counts", {}),
+        )
+        frame_changes.append(
+            {
+                "frame_id": frame_id,
+                "metrics_by_iou": metrics_by_iou,
+                "primary_reason_counts": reason_changes,
+            }
+        )
+
+    distributions = {}
+    top_changes = {}
+    for iou_key in REQUIRED_IOU_KEYS:
+        distributions[iou_key] = {
+            "tp": sign_distribution(frame_changes, iou_key, "tp"),
+            "fp": sign_distribution(frame_changes, iou_key, "fp"),
+        }
+        top_changes[iou_key] = {
+            "tp_gain_top5": rank_positive_frame_changes(frame_changes, iou_key, "tp", top_k),
+            "fp_growth_top5": rank_positive_frame_changes(frame_changes, iou_key, "fp", top_k),
+            "effective_detection_growth_top5": rank_positive_frame_changes(
+                frame_changes,
+                iou_key,
+                "effective_car_detection_count",
+                top_k,
+            ),
+        }
+
+    reason_growth_frames = {
+        reason: rank_positive_reason_changes(frame_changes, reason, top_k=None)
+        for reason in (
+            "cluster_fragmentation",
+            "cluster_merging",
+            "final_iou_below_threshold",
+        )
+    }
+    return {
+        "num_frames": int(len(frame_changes)),
+        "change_distributions_by_iou": distributions,
+        "top_changes_by_iou": top_changes,
+        "reason_growth_frames": reason_growth_frames,
+        "frames": frame_changes,
+    }
+
+
+def sign_distribution(frame_changes, iou_key, field):
+    values = [item["metrics_by_iou"][iou_key][field]["delta"] for item in frame_changes]
+    return {
+        "increased_frames": sum(value > 0 for value in values),
+        "unchanged_frames": sum(value == 0 for value in values),
+        "decreased_frames": sum(value < 0 for value in values),
+    }
+
+
+def rank_positive_frame_changes(frame_changes, iou_key, field, top_k):
+    ranked = []
+    for item in frame_changes:
+        values = item["metrics_by_iou"][iou_key][field]
+        if values["delta"] > 0:
+            ranked.append({"frame_id": item["frame_id"], **values})
+    ranked.sort(key=lambda item: (-item["delta"], item["frame_id"]))
+    return ranked[:top_k]
+
+
+def rank_positive_reason_changes(frame_changes, reason, top_k=None):
+    ranked = []
+    for item in frame_changes:
+        values = item["primary_reason_counts"].get(reason, {"i0": 0, "i1": 0, "delta": 0})
+        if values["delta"] > 0:
+            ranked.append({"frame_id": item["frame_id"], **values})
+    ranked.sort(key=lambda item: (-item["delta"], item["frame_id"]))
+    return ranked if top_k is None else ranked[:top_k]
+
+
+def build_distance_analysis(i0_report, i1_report):
+    i0_records = index_gt_candidate_records(i0_report)
+    i1_records = index_gt_candidate_records(i1_report)
+    require_same_keys(i0_records, i1_records, "GT candidate records")
+
+    for key in i0_records:
+        if i0_records[key]["distance_bin"] != i1_records[key]["distance_bin"]:
+            raise IntensityDiagnosticError(f"GT distance bin changed between I0/I1: {key[0]} {key[1]}")
+
+    output = {}
+    for distance_bin in DISTANCE_BIN_ORDER:
+        i0_bin_records = [item for item in i0_records.values() if item["distance_bin"] == distance_bin]
+        i1_bin_records = [item for item in i1_records.values() if item["distance_bin"] == distance_bin]
+        i0_summary = summarize_distance_records(i0_bin_records)
+        i1_summary = summarize_distance_records(i1_bin_records)
+        output[distance_bin] = {
+            "i0": i0_summary,
+            "i1": i1_summary,
+            "delta": distance_summary_delta(i0_summary, i1_summary),
+        }
+    return output
+
+
+def summarize_distance_records(records):
+    num_gt = len(records)
+    gt_with_cluster = sum(bool(item["cluster_ids"]) for item in records)
+    gt_with_car_candidate = sum(bool(item["car_detection_ids_after_nms"]) for item in records)
+    zero_car_candidate_gt = num_gt - gt_with_car_candidate
+    metrics_by_iou = {}
+    for iou_key in REQUIRED_IOU_KEYS:
+        tp = sum(bool(item["matched_by_iou"][iou_key]) for item in records)
+        metrics_by_iou[iou_key] = {"tp": int(tp), "fn": int(num_gt - tp)}
+    return {
+        "num_positive_gt": int(num_gt),
+        "gt_with_cluster": int(gt_with_cluster),
+        "cluster_coverage_ratio": safe_ratio(gt_with_cluster, num_gt),
+        "gt_with_car_candidate": int(gt_with_car_candidate),
+        "car_candidate_coverage_ratio": safe_ratio(gt_with_car_candidate, num_gt),
+        "zero_car_candidate_gt": int(zero_car_candidate_gt),
+        "zero_car_candidate_ratio": safe_ratio(zero_car_candidate_gt, num_gt),
+        "metrics_by_iou": metrics_by_iou,
+    }
+
+
+def distance_summary_delta(i0_summary, i1_summary):
+    fields = (
+        "num_positive_gt",
+        "gt_with_cluster",
+        "gt_with_car_candidate",
+        "zero_car_candidate_gt",
+    )
+    return {
+        **{
+            field: int(i1_summary[field]) - int(i0_summary[field])
+            for field in fields
+        },
+        "metrics_by_iou": {
+            iou_key: {
+                field: int(i1_summary["metrics_by_iou"][iou_key][field])
+                - int(i0_summary["metrics_by_iou"][iou_key][field])
+                for field in ("tp", "fn")
+            }
+            for iou_key in REQUIRED_IOU_KEYS
+        },
+    }
+
+
+def build_gt_incremental_analysis(i0_report, i1_report):
+    i0_records = index_gt_candidate_records(i0_report)
+    i1_records = index_gt_candidate_records(i1_report)
+    require_same_keys(i0_records, i1_records, "GT candidate records")
+    records = []
+
+    for frame_id, gt_id in sorted(i0_records):
+        i0 = i0_records[(frame_id, gt_id)]
+        i1 = i1_records[(frame_id, gt_id)]
+        validate_frozen_gt_inputs(i0, i1, frame_id, gt_id)
+        i0_intensity_points = int(i0["stage_point_counts"]["intensity_filter"])
+        i1_intensity_points = int(i1["stage_point_counts"]["intensity_filter"])
+        added_points = i1_intensity_points - i0_intensity_points
+        if added_points < 0:
+            raise IntensityDiagnosticError(f"I1 removed additional GT points: {frame_id} {gt_id}")
+
+        matched_i0 = {iou_key: bool(i0["matched_by_iou"][iou_key]) for iou_key in REQUIRED_IOU_KEYS}
+        matched_i1 = {iou_key: bool(i1["matched_by_iou"][iou_key]) for iou_key in REQUIRED_IOU_KEYS}
+        fn_to_tp = {
+            iou_key: bool(not matched_i0[iou_key] and matched_i1[iou_key])
+            for iou_key in REQUIRED_IOU_KEYS
+        }
+        tp_to_fn = {
+            iou_key: bool(matched_i0[iou_key] and not matched_i1[iou_key])
+            for iou_key in REQUIRED_IOU_KEYS
+        }
+        i0_best_iou = float(i0["best_iou_after_nms"])
+        i1_best_iou = float(i1["best_iou_after_nms"])
+        records.append(
+            {
+                "frame_id": frame_id,
+                "gt_id": gt_id,
+                "range_xy_m": float(i0["range_xy_m"]),
+                "distance_bin": i0["distance_bin"],
+                "intensity_points_i0": i0_intensity_points,
+                "intensity_points_i1": i1_intensity_points,
+                "intensity_points_added": int(added_points),
+                "new_cluster": bool(not i0["cluster_ids"] and i1["cluster_ids"]),
+                "new_car_candidate": bool(
+                    not i0["car_detection_ids_after_nms"]
+                    and i1["car_detection_ids_after_nms"]
+                ),
+                "best_iou_after_nms_i0": i0_best_iou,
+                "best_iou_after_nms_i1": i1_best_iou,
+                "best_iou_delta": float(i1_best_iou - i0_best_iou),
+                "matched_by_iou_i0": matched_i0,
+                "matched_by_iou_i1": matched_i1,
+                "fn_to_tp_by_iou": fn_to_tp,
+                "tp_to_fn_by_iou": tp_to_fn,
+                "candidate_outcome_i0": i0["candidate_outcome"],
+                "candidate_outcome_i1": i1["candidate_outcome"],
+            }
+        )
+
+    transition_counts = {}
+    for item in records:
+        transition = f'{item["candidate_outcome_i0"]} -> {item["candidate_outcome_i1"]}'
+        transition_counts[transition] = transition_counts.get(transition, 0) + 1
+    return {
+        "summary": {
+            "num_positive_gt": int(len(records)),
+            "total_intensity_points_added_inside_gt": int(sum(item["intensity_points_added"] for item in records)),
+            "new_cluster_gt_count": int(sum(item["new_cluster"] for item in records)),
+            "new_car_candidate_gt_count": int(sum(item["new_car_candidate"] for item in records)),
+            "best_iou_increased_gt_count": int(sum(item["best_iou_delta"] > 0.0 for item in records)),
+            "best_iou_unchanged_gt_count": int(sum(item["best_iou_delta"] == 0.0 for item in records)),
+            "best_iou_decreased_gt_count": int(sum(item["best_iou_delta"] < 0.0 for item in records)),
+            "fn_to_tp_by_iou": {
+                iou_key: int(sum(item["fn_to_tp_by_iou"][iou_key] for item in records))
+                for iou_key in REQUIRED_IOU_KEYS
+            },
+            "tp_to_fn_by_iou": {
+                iou_key: int(sum(item["tp_to_fn_by_iou"][iou_key] for item in records))
+                for iou_key in REQUIRED_IOU_KEYS
+            },
+            "candidate_outcome_transitions": dict(sorted(transition_counts.items())),
+        },
+        "records": records,
+    }
+
+
+def validate_frozen_gt_inputs(i0, i1, frame_id, gt_id):
+    for field in ("raw", "roi", "z_filter"):
+        if int(i0["stage_point_counts"][field]) != int(i1["stage_point_counts"][field]):
+            raise IntensityDiagnosticError(f"frozen GT stage points changed: {frame_id} {gt_id} {field}")
+    if float(i0["range_xy_m"]) != float(i1["range_xy_m"]):
+        raise IntensityDiagnosticError(f"GT range changed between I0/I1: {frame_id} {gt_id}")
+    if i0["distance_bin"] != i1["distance_bin"]:
+        raise IntensityDiagnosticError(f"GT distance bin changed between I0/I1: {frame_id} {gt_id}")
+
+
+def build_zero_detection_analysis(i0_invariants, i1_invariants):
+    i0_coverage = i0_invariants["candidate_coverage"]
+    i1_coverage = i1_invariants["candidate_coverage"]
+    i0_count = int(i0_coverage["zero_car_candidate_gt_count"])
+    i1_count = int(i1_coverage["zero_car_candidate_gt_count"])
+    decrease = i0_count - i1_count
+    return {
+        "eligible_positive_gt": int(i0_coverage["counts"]["num_positive_gt"]),
+        "i0": i0_count,
+        "i1": i1_count,
+        "decrease_count": int(decrease),
+        "decrease_ratio": safe_ratio(decrease, i0_count),
+        "zero_candidate_breakdown": {
+            outcome: {
+                "i0": int(i0_coverage["candidate_outcome_counts"].get(outcome, 0)),
+                "i1": int(i1_coverage["candidate_outcome_counts"].get(outcome, 0)),
+                "delta": int(i1_coverage["candidate_outcome_counts"].get(outcome, 0))
+                - int(i0_coverage["candidate_outcome_counts"].get(outcome, 0)),
+            }
+            for outcome in ZERO_CANDIDATE_OUTCOMES
+        },
+        "final_car_candidate_below_primary_iou": {
+            "i0": int(i0_coverage["candidate_outcome_counts"].get("final_car_candidate_below_primary_iou", 0)),
+            "i1": int(i1_coverage["candidate_outcome_counts"].get("final_car_candidate_below_primary_iou", 0)),
+            "delta": int(i1_coverage["candidate_outcome_counts"].get("final_car_candidate_below_primary_iou", 0))
+            - int(i0_coverage["candidate_outcome_counts"].get("final_car_candidate_below_primary_iou", 0)),
+        },
+    }
+
+
+def index_frame_reports(report):
+    output = {}
+    for frame in report.get("frames", []):
+        frame_id = str(frame["frame_id"]).zfill(6)
+        if frame_id in output:
+            raise IntensityDiagnosticError(f"duplicate frame in intensity report: {frame_id}")
+        output[frame_id] = frame
+    return output
+
+
+def index_gt_candidate_records(report):
+    records = report.get("gt_candidate_records")
+    if not isinstance(records, list):
+        raise IntensityDiagnosticError("diagnostic report missing GT candidate records")
+    output = {}
+    for item in records:
+        key = (str(item["frame_id"]).zfill(6), str(item["gt_id"]))
+        if key in output:
+            raise IntensityDiagnosticError(f"duplicate GT candidate record: {key[0]} {key[1]}")
+        output[key] = item
+    expected_count = int(report["summary"]["candidate_coverage"]["counts"]["num_positive_gt"])
+    if len(output) != expected_count:
+        raise IntensityDiagnosticError("GT candidate record count does not match positive GT count")
+    return output
+
+
+def require_same_keys(i0_items, i1_items, description):
+    if set(i0_items) != set(i1_items):
+        raise IntensityDiagnosticError(f"I0/I1 {description} do not contain the same keys")
+
+
+def safe_ratio(numerator, denominator):
+    if denominator == 0:
+        return None
+    return float(numerator / denominator)
+
+
+def selected_value_comparison(i0_values, i1_values, fields):
+    return {
+        field: {
+            "i0": int(i0_values[field]),
+            "i1": int(i1_values[field]),
+            "delta": int(i1_values[field]) - int(i0_values[field]),
+        }
+        for field in fields
     }
 
 
