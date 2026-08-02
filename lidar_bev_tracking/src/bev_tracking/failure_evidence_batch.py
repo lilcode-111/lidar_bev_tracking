@@ -2,7 +2,10 @@ from collections import Counter
 from pathlib import Path
 
 from bev_tracking.experiment_gate import sha256_file
-from bev_tracking.failure_evidence import build_failure_evidence_report
+from bev_tracking.failure_evidence import (
+    build_failure_evidence_report,
+    summarize_gt_candidate_records,
+)
 from bev_tracking.geometry_sanity import (
     DEFAULT_CENTER_TOLERANCE_M,
     DEFAULT_YAW_TOLERANCE_RAD,
@@ -152,6 +155,19 @@ def aggregate_diagnostic_reports(
         "corner_alignment_error_m": [],
     }
     geometry_tolerances = {}
+    gt_candidate_records = []
+    stage_point_totals = {"raw": 0, "roi": 0, "z_filter": 0, "intensity_filter": 0}
+    candidate_generation_totals = {
+        "cluster_count": 0,
+        "raw_detection_count": 0,
+        "car_candidate_count_before_nms": 0,
+        "non_car_candidate_count": 0,
+        "nms_suppressed_count": 0,
+        "car_nms_suppressed_count": 0,
+        "final_car_detection_count": 0,
+        "neutralized_detection_count": 0,
+        "effective_car_detection_count": 0,
+    }
 
     for frame_report in frame_reports:
         geometry_report = frame_report["geometry_sanity"]
@@ -160,6 +176,12 @@ def aggregate_diagnostic_reports(
         geometry_passed_frames += int(bool(geometry_report["passed"] and yaw_semantic_report["passed"]))
         total_positive_gt += int(evidence_report["summary"]["num_positive_gt"])
         total_false_negatives += int(evidence_report["summary"]["num_false_negatives"])
+        gt_candidate_records.extend(evidence_report.get("gt_candidate_records", []))
+
+        for stage_name, value in evidence_report["summary"].get("stage_point_counts", {}).items():
+            stage_point_totals[stage_name] += int(value)
+        for field, value in evidence_report["summary"].get("candidate_generation", {}).items():
+            candidate_generation_totals[field] += int(value)
 
         collect_box_measurements(
             geometry_measurements,
@@ -188,6 +210,10 @@ def aggregate_diagnostic_reports(
             if item["primary_reason"] == "final_iou_below_threshold" and item.get("geometry_delta_after_nms"):
                 low_iou_deltas.append(item["geometry_delta_after_nms"])
 
+    candidate_coverage = summarize_gt_candidate_records(gt_candidate_records)
+    if gt_candidate_records and candidate_coverage["counts"]["num_positive_gt"] != total_positive_gt:
+        raise ValueError("GT candidate record count does not match positive GT count")
+
     return {
         "schema_version": FAILURE_EVIDENCE_BATCH_SCHEMA_VERSION,
         "source": {
@@ -206,10 +232,14 @@ def aggregate_diagnostic_reports(
             ),
             "num_positive_gt": int(total_positive_gt),
             "num_false_negatives": int(total_false_negatives),
+            "stage_point_counts": stage_point_totals,
+            "candidate_generation_totals": candidate_generation_totals,
+            "candidate_coverage": candidate_coverage,
             "primary_reason_counts": dict(sorted(primary_reasons.items())),
             "supporting_flag_counts": dict(sorted(supporting_flags.items())),
             "low_iou_geometry": summarize_geometry_deltas(low_iou_deltas),
         },
+        "gt_candidate_records": gt_candidate_records,
         "frames": frame_reports,
     }
 

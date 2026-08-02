@@ -44,7 +44,26 @@ def diagnostic_report(intensity_min=0.0, identical=True):
             "requested_frame_ids": ["000001"],
             "diagnostic_manifest": {"sha256": "manifest-hash"},
         },
-        "summary": {"geometry_failed_frames": 0},
+        "summary": {
+            "geometry_failed_frames": 0,
+            "candidate_coverage": {
+                "counts": {
+                    "num_positive_gt": 2,
+                    "gt_with_cluster": 2,
+                    "gt_with_raw_detection": 2,
+                    "gt_with_car_detection_before_nms": 2,
+                    "gt_with_car_detection_after_nms": 2,
+                    "gt_with_best_iou_ge_0_10": 2,
+                    "gt_with_best_iou_ge_0_15": 2,
+                    "gt_with_best_iou_ge_0_25": 2,
+                    "gt_with_best_iou_ge_0_50": 1,
+                },
+                "ratios": {},
+                "zero_detection_with_gt_eligible_count": 0,
+                "zero_car_candidate_gt_count": 0,
+                "candidate_outcome_counts": {"matched_at_primary_iou": 1, "final_car_candidate_below_primary_iou": 1},
+            },
+        },
         "frames": [
             {
                 "frame_id": "000001",
@@ -62,6 +81,17 @@ def diagnostic_report(intensity_min=0.0, identical=True):
                         "num_raw_detections": 5,
                         "num_car_detections_before_nms": 4,
                         "num_detections_after_nms": 4,
+                        "candidate_generation": {
+                            "cluster_count": 5,
+                            "raw_detection_count": 5,
+                            "car_candidate_count_before_nms": 4,
+                            "non_car_candidate_count": 1,
+                            "nms_suppressed_count": 1,
+                            "car_nms_suppressed_count": 0,
+                            "final_car_detection_count": 4,
+                            "neutralized_detection_count": 1,
+                            "effective_car_detection_count": 4,
+                        },
                         "metrics_by_iou": metrics,
                     },
                 },
@@ -122,6 +152,13 @@ class IntensityInvariantTest(unittest.TestCase):
     def test_tp_plus_fn_conservation_is_required(self):
         report = diagnostic_report()
         report["frames"][0]["failure_evidence"]["summary"]["metrics_by_iou"]["0.50"]["fn"] = 5
+
+        with self.assertRaises(IntensityDiagnosticError):
+            validate_report_invariants(report, {"detector": {"intensity_min": 0.0}}, manifest())
+
+    def test_cluster_and_raw_detection_conservation_is_required(self):
+        report = diagnostic_report()
+        report["frames"][0]["failure_evidence"]["summary"]["candidate_generation"]["cluster_count"] = 6
 
         with self.assertRaises(IntensityDiagnosticError):
             validate_report_invariants(report, {"detector": {"intensity_min": 0.0}}, manifest())

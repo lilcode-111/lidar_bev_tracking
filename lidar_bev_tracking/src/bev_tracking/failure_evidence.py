@@ -17,6 +17,7 @@ from bev_tracking.result_types import FailureEvidence, FailureReason, FilterStag
 
 
 FAILURE_EVIDENCE_SCHEMA_VERSION = "15.1"
+GT_COVERAGE_IOU_THRESHOLDS = (0.10, 0.15, 0.25, 0.50)
 
 
 def build_failure_evidence_report(
@@ -80,6 +81,34 @@ def build_failure_evidence_report(
     metrics_by_iou = evaluation_metrics_by_iou(evaluation)
     stage_point_counts = {stage_name: int(len(stage_points)) for stage_name, stage_points in stages.items()}
     car_detections_before_nms = [det for det in raw_detections if is_positive_detection(det)]
+    car_detections_after_nms = [det for det in detections_after_nms if is_positive_detection(det)]
+    matched_gt_ids_by_iou = evaluation_matched_gt_ids_by_iou(evaluation)
+    gt_candidate_records = [
+        build_gt_candidate_record(
+            frame_id=frame_id,
+            gt_box=gt_box,
+            stages=stages,
+            cluster_gt_ids=cluster_gt_ids,
+            raw_detections=raw_detections,
+            detections_after_nms=detections_after_nms,
+            matched_gt_ids_by_iou=matched_gt_ids_by_iou,
+            primary_iou_key=f"{eval_iou_threshold:.2f}",
+        )
+        for gt_box in positive_gt
+    ]
+    candidate_coverage = summarize_gt_candidate_records(gt_candidate_records)
+    primary_metrics = metrics_by_iou[f"{eval_iou_threshold:.2f}"]
+    candidate_generation = {
+        "cluster_count": int(len(clusters)),
+        "raw_detection_count": int(len(raw_detections)),
+        "car_candidate_count_before_nms": int(len(car_detections_before_nms)),
+        "non_car_candidate_count": int(len(raw_detections) - len(car_detections_before_nms)),
+        "nms_suppressed_count": int(len(raw_detections) - len(detections_after_nms)),
+        "car_nms_suppressed_count": int(len(car_detections_before_nms) - len(car_detections_after_nms)),
+        "final_car_detection_count": int(len(car_detections_after_nms)),
+        "neutralized_detection_count": int(primary_metrics["neutralized_detections"]),
+        "effective_car_detection_count": int(primary_metrics["effective_car_detection_count"]),
+    }
 
     return {
         "schema_version": FAILURE_EVIDENCE_SCHEMA_VERSION,
@@ -104,10 +133,147 @@ def build_failure_evidence_report(
             "num_car_detections_before_nms": int(len(car_detections_before_nms)),
             "num_detections_after_nms": int(len(detections_after_nms)),
             "metrics_by_iou": metrics_by_iou,
+            "candidate_generation": candidate_generation,
+            "candidate_coverage": candidate_coverage,
             "primary_reason_counts": dict(sorted(reason_counts.items())),
         },
+        "gt_candidate_records": gt_candidate_records,
         "failure_evidence": [item.to_dict() for item in evidence],
     }
+
+
+def evaluation_matched_gt_ids_by_iou(evaluation):
+    outputs = {
+        f'{evaluation["iou_threshold"]:.2f}': {
+            str(item["gt_id"])
+            for item in evaluation.get("matches", [])
+        }
+    }
+    for iou_key, auxiliary in evaluation.get("auxiliary", {}).items():
+        outputs[iou_key] = {
+            str(item["gt_id"])
+            for item in auxiliary.get("matches", [])
+        }
+    return outputs
+
+
+def build_gt_candidate_record(
+    frame_id,
+    gt_box,
+    stages,
+    cluster_gt_ids,
+    raw_detections,
+    detections_after_nms,
+    matched_gt_ids_by_iou,
+    primary_iou_key,
+):
+    stage_counts = gt_filter_stage_counts(stages, gt_box)
+    associated_indices = [
+        index
+        for index, gt_ids in enumerate(cluster_gt_ids)
+        if gt_box["id"] in gt_ids
+    ]
+    associated_raw = [raw_detections[index] for index in associated_indices]
+    associated_car_before_nms = [det for det in associated_raw if is_positive_detection(det)]
+    kept_ids = {str(det["id"]) for det in detections_after_nms}
+    associated_car_after_nms = [
+        det
+        for det in associated_car_before_nms
+        if str(det["id"]) in kept_ids
+    ]
+    positive_before_nms = [det for det in raw_detections if is_positive_detection(det)]
+    positive_after_nms = [det for det in detections_after_nms if is_positive_detection(det)]
+    best_iou_before_nms, _ = best_iou_candidate(gt_box, positive_before_nms)
+    best_iou_after_nms, _ = best_iou_candidate(gt_box, positive_after_nms)
+    matched_by_iou = {
+        iou_key: str(gt_box["id"]) in matched_gt_ids
+        for iou_key, matched_gt_ids in sorted(matched_gt_ids_by_iou.items(), reverse=True)
+    }
+
+    if not associated_indices:
+        candidate_outcome = "no_cluster"
+    elif not associated_raw:
+        candidate_outcome = "cluster_without_raw_detection"
+    elif not associated_car_before_nms:
+        candidate_outcome = "raw_detection_rejected_as_non_car"
+    elif not associated_car_after_nms:
+        candidate_outcome = "car_candidate_removed_by_nms"
+    elif matched_by_iou.get(primary_iou_key, False):
+        candidate_outcome = "matched_at_primary_iou"
+    else:
+        candidate_outcome = "final_car_candidate_below_primary_iou"
+
+    range_xy_m = float(np.hypot(float(gt_box["x"]), float(gt_box["y"])))
+    return {
+        "frame_id": str(frame_id).zfill(6),
+        "gt_id": str(gt_box["id"]),
+        "range_xy_m": range_xy_m,
+        "distance_bin": distance_bin(range_xy_m),
+        "stage_point_counts": stage_counts.to_dict(),
+        "cluster_ids": [f"cluster_{index + 1}" for index in associated_indices],
+        "raw_detection_ids": [str(det["id"]) for det in associated_raw],
+        "car_detection_ids_before_nms": [str(det["id"]) for det in associated_car_before_nms],
+        "car_detection_ids_after_nms": [str(det["id"]) for det in associated_car_after_nms],
+        "best_iou_before_nms": float(best_iou_before_nms),
+        "best_iou_after_nms": float(best_iou_after_nms),
+        "matched_by_iou": matched_by_iou,
+        "candidate_outcome": candidate_outcome,
+    }
+
+
+def summarize_gt_candidate_records(records):
+    counts = {
+        "num_positive_gt": int(len(records)),
+        "gt_with_cluster": sum(bool(item["cluster_ids"]) for item in records),
+        "gt_with_raw_detection": sum(bool(item["raw_detection_ids"]) for item in records),
+        "gt_with_car_detection_before_nms": sum(
+            bool(item["car_detection_ids_before_nms"])
+            for item in records
+        ),
+        "gt_with_car_detection_after_nms": sum(
+            bool(item["car_detection_ids_after_nms"])
+            for item in records
+        ),
+    }
+    for threshold in GT_COVERAGE_IOU_THRESHOLDS:
+        field = f"gt_with_best_iou_ge_{threshold:.2f}".replace(".", "_")
+        counts[field] = sum(float(item["best_iou_after_nms"]) >= threshold for item in records)
+
+    denominator = counts["num_positive_gt"]
+    ratios = {
+        field: float(value / denominator) if denominator else None
+        for field, value in counts.items()
+        if field != "num_positive_gt"
+    }
+    outcome_counts = Counter(item["candidate_outcome"] for item in records)
+    zero_car_candidate_gt_count = sum(
+        not item["car_detection_ids_after_nms"]
+        for item in records
+    )
+    return {
+        "counts": {field: int(value) for field, value in counts.items()},
+        "ratios": ratios,
+        "zero_detection_with_gt_eligible_count": int(zero_car_candidate_gt_count),
+        "zero_car_candidate_gt_count": int(zero_car_candidate_gt_count),
+        "candidate_outcome_counts": dict(sorted(outcome_counts.items())),
+    }
+
+
+def gt_filter_stage_counts(stages, gt_box):
+    return FilterStageCounts(
+        **{
+            stage_name: int(points_in_oriented_3d_box(stage_points, gt_box).sum())
+            for stage_name, stage_points in stages.items()
+        }
+    )
+
+
+def distance_bin(range_xy_m):
+    if range_xy_m < 15.0:
+        return "near_0_15"
+    if range_xy_m < 30.0:
+        return "mid_15_30"
+    return "far_30_inf"
 
 
 def evaluation_metrics_by_iou(evaluation):
@@ -139,12 +305,7 @@ def build_gt_failure_evidence(
     eval_iou_threshold,
     source_run_id=None,
 ):
-    stage_counts = FilterStageCounts(
-        **{
-            stage_name: int(points_in_oriented_3d_box(stage_points, gt_box).sum())
-            for stage_name, stage_points in stages.items()
-        }
-    )
+    stage_counts = gt_filter_stage_counts(stages, gt_box)
     associated_indices = [
         index
         for index, gt_ids in enumerate(cluster_gt_ids)

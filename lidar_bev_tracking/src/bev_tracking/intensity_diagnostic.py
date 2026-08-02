@@ -102,6 +102,18 @@ def validate_report_invariants(report, config, manifest, require_intensity_ident
         for iou_key in REQUIRED_IOU_KEYS
     }
     intensity_identity_frames = 0
+    total_positive_gt = 0
+    aggregate_candidate_generation = {
+        "cluster_count": 0,
+        "raw_detection_count": 0,
+        "car_candidate_count_before_nms": 0,
+        "non_car_candidate_count": 0,
+        "nms_suppressed_count": 0,
+        "car_nms_suppressed_count": 0,
+        "final_car_detection_count": 0,
+        "neutralized_detection_count": 0,
+        "effective_car_detection_count": 0,
+    }
 
     for frame in report["frames"]:
         frame_id = str(frame["frame_id"]).zfill(6)
@@ -128,6 +140,7 @@ def validate_report_invariants(report, config, manifest, require_intensity_ident
         if any(iou_key not in metrics_by_iou for iou_key in REQUIRED_IOU_KEYS):
             raise IntensityDiagnosticError(f"required IoU metrics missing: {frame_id}")
         positive_gt = int(summary["num_positive_gt"])
+        total_positive_gt += positive_gt
         effective_counts = []
         for iou_key in REQUIRED_IOU_KEYS:
             metrics = metrics_by_iou[iou_key]
@@ -142,15 +155,58 @@ def validate_report_invariants(report, config, manifest, require_intensity_ident
         if len(set(effective_counts)) != 1:
             raise IntensityDiagnosticError(f"effective detection count differs across IoU thresholds: {frame_id}")
 
+        candidate_generation = summary["candidate_generation"]
+        validate_candidate_generation(candidate_generation, effective_counts[0], frame_id)
+        for field in aggregate_candidate_generation:
+            aggregate_candidate_generation[field] += int(candidate_generation[field])
+
+    candidate_coverage = report.get("summary", {}).get("candidate_coverage")
+    if not isinstance(candidate_coverage, dict):
+        raise IntensityDiagnosticError("diagnostic report missing GT candidate coverage")
+    coverage_counts = candidate_coverage.get("counts", {})
+    if int(coverage_counts.get("num_positive_gt", -1)) != total_positive_gt:
+        raise IntensityDiagnosticError("GT candidate coverage denominator mismatch")
+
     return {
         "passed": True,
         "num_frames": len(report_ids),
         "manifest_sha256": manifest["sha256"],
         "stage_point_counts": aggregate_stage_counts,
         "metrics_by_iou": aggregate_metrics,
+        "candidate_generation_totals": aggregate_candidate_generation,
+        "candidate_coverage": candidate_coverage,
         "z_to_intensity_identical_frames": intensity_identity_frames,
         "require_intensity_identity": bool(require_intensity_identity),
     }
+
+
+def validate_candidate_generation(candidate_generation, effective_car_detection_count, frame_id):
+    required_fields = {
+        "cluster_count",
+        "raw_detection_count",
+        "car_candidate_count_before_nms",
+        "non_car_candidate_count",
+        "nms_suppressed_count",
+        "car_nms_suppressed_count",
+        "final_car_detection_count",
+        "neutralized_detection_count",
+        "effective_car_detection_count",
+    }
+    missing = sorted(required_fields - set(candidate_generation))
+    if missing:
+        raise IntensityDiagnosticError(f"candidate generation fields missing: {frame_id} {', '.join(missing)}")
+
+    values = {field: int(candidate_generation[field]) for field in required_fields}
+    if values["cluster_count"] != values["raw_detection_count"]:
+        raise IntensityDiagnosticError(f"cluster/raw detection conservation failed: {frame_id}")
+    if values["car_candidate_count_before_nms"] + values["non_car_candidate_count"] != values["raw_detection_count"]:
+        raise IntensityDiagnosticError(f"Car/non-Car candidate conservation failed: {frame_id}")
+    if values["car_candidate_count_before_nms"] - values["car_nms_suppressed_count"] != values["final_car_detection_count"]:
+        raise IntensityDiagnosticError(f"Car NMS candidate conservation failed: {frame_id}")
+    if values["effective_car_detection_count"] != effective_car_detection_count:
+        raise IntensityDiagnosticError(f"candidate/evaluation effective detection mismatch: {frame_id}")
+    if values["final_car_detection_count"] != effective_car_detection_count:
+        raise IntensityDiagnosticError(f"final/effective Car detection mismatch: {frame_id}")
 
 
 def validate_i0_reproduces_baseline(i0_report, baseline_batch_result, manifest):
@@ -226,6 +282,24 @@ def build_intensity_comparison(
                 i0_report["summary"]["primary_reason_counts"],
                 i1_report["summary"]["primary_reason_counts"],
             ),
+            "candidate_generation_totals": value_comparison(
+                i0_invariants["candidate_generation_totals"],
+                i1_invariants["candidate_generation_totals"],
+            ),
+            "gt_candidate_coverage_counts": value_comparison(
+                i0_invariants["candidate_coverage"]["counts"],
+                i1_invariants["candidate_coverage"]["counts"],
+            ),
+            "candidate_outcome_counts": value_comparison(
+                i0_invariants["candidate_coverage"]["candidate_outcome_counts"],
+                i1_invariants["candidate_coverage"]["candidate_outcome_counts"],
+            ),
+            "zero_car_candidate_gt_count": {
+                "i0": int(i0_invariants["candidate_coverage"]["zero_car_candidate_gt_count"]),
+                "i1": int(i1_invariants["candidate_coverage"]["zero_car_candidate_gt_count"]),
+                "delta": int(i1_invariants["candidate_coverage"]["zero_car_candidate_gt_count"])
+                - int(i0_invariants["candidate_coverage"]["zero_car_candidate_gt_count"]),
+            },
         },
     }
 
