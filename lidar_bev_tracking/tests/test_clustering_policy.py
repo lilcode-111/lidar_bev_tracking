@@ -41,6 +41,15 @@ class ClusteringPolicyTest(unittest.TestCase):
         policy = ClusteringPolicy(mode="adaptive", distance_params=params)
         self.assertEqual(policy.params_for_range(40.0)["eps"], 0.8)
 
+    def test_adaptive_eps_uses_configured_global_bound(self):
+        params = {
+            "near_0_15": {"eps": 0.4, "min_points": 20},
+            "mid_15_30": {"eps": 0.5, "min_points": 15},
+            "far_30_inf": {"eps": 0.6, "min_points": 8},
+        }
+        policy = ClusteringPolicy(mode="adaptive", global_max_eps=0.6, distance_params=params)
+        self.assertEqual(policy.global_max_eps, 0.6)
+
 
 if __name__ == "__main__":
     unittest.main()

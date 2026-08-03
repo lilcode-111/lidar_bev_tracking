@@ -53,7 +53,7 @@ class ClusteringPolicy:
         if float(self.eps) > float(self.global_max_eps):
             raise ValueError("eps must not exceed global_max_eps")
         if self.mode == "adaptive":
-            validate_distance_params(self.distance_params)
+            validate_distance_params(self.distance_params, self.global_max_eps)
 
     def params_for_range(self, range_xy_m):
         if self.mode == "fixed":
@@ -82,7 +82,7 @@ def pairwise_eps(eps_i, eps_j):
     return max(left, right)
 
 
-def validate_distance_params(distance_params):
+def validate_distance_params(distance_params, global_max_eps=GLOBAL_MAX_EPS):
     if not isinstance(distance_params, dict):
         raise ValueError("adaptive distance_params must be a mapping")
     if set(distance_params) != set(DISTANCE_BIN_NAMES):
@@ -94,8 +94,8 @@ def validate_distance_params(distance_params):
             raise ValueError(f"invalid clustering parameters for {name}")
         eps = float(params["eps"])
         min_points = params["min_points"]
-        if not math.isfinite(eps) or eps <= 0 or eps > GLOBAL_MAX_EPS:
-            raise ValueError(f"adaptive eps for {name} must be in (0, {GLOBAL_MAX_EPS}]")
+        if not math.isfinite(eps) or eps <= 0 or eps > float(global_max_eps):
+            raise ValueError(f"adaptive eps for {name} must be in (0, {global_max_eps}]")
         if isinstance(min_points, bool) or not isinstance(min_points, int) or min_points <= 0:
             raise ValueError(f"adaptive min_points for {name} must be a positive integer")
 
@@ -116,6 +116,4 @@ def clustering_policy_from_config(config):
         global_max_eps=float(clustering.get("global_max_eps", GLOBAL_MAX_EPS)),
         distance_params=clustering.get("distance_params"),
     )
-    if policy.mode == "adaptive":
-        validate_distance_params(policy.distance_params)
     return policy
