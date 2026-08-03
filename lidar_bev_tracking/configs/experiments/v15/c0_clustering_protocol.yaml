@@ -1,0 +1,15 @@
+# v15.2 Day1 protocol snapshot. The fixed mode preserves A0 prime semantics.
+clustering:
+  mode: fixed
+  eps: 0.6
+  min_points: 20
+  global_max_eps: 0.85
+  distance_bins:
+    near_0_15:
+      range: [0.0, 15.0]
+    mid_15_30:
+      range: [15.0, 30.0]
+    far_30_inf:
+      range: [30.0, null]
+  pairwise_rule: "max(eps_i, eps_j)"
+  min_points_includes_query_point: true
