@@ -161,3 +161,86 @@ def compare_eligible_gt_sets(reports_by_variant):
         if current != reference
     }
     return {"passed": not mismatches, "eligible_gt_by_variant": sets, "mismatches": mismatches}
+
+
+def aggregate_variant_reports(variant_name, reports):
+    if not reports:
+        raise ValueError(f"variant has no frame reports: {variant_name}")
+    totals = {
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "neutralized_detections": 0,
+        "effective_car_detection_count": 0,
+        "num_positive_gt": 0,
+        "zero_detection_with_gt": 0,
+        "merged_positive_gt_count": 0,
+        "eligible_positive_gt_count": 0,
+    }
+    auxiliary = {"tp": 0, "fp": 0, "fn": 0, "neutralized_detections": 0}
+    for report in reports:
+        summary = report["summary"]
+        primary = summary["metrics_by_iou"]["0.50"]
+        totals["tp"] += int(primary["tp"])
+        totals["fp"] += int(primary["fp"])
+        totals["fn"] += int(primary["fn"])
+        totals["neutralized_detections"] += int(primary["neutralized_detections"])
+        totals["effective_car_detection_count"] += int(primary["effective_car_detection_count"])
+        totals["num_positive_gt"] += int(summary["num_positive_gt"])
+        totals["zero_detection_with_gt"] += int(
+            summary["candidate_coverage"]["zero_detection_with_gt_eligible_count"]
+        )
+        merging = summary.get("merging", {})
+        totals["merged_positive_gt_count"] += int(merging.get("merged_positive_gt_count", 0))
+        totals["eligible_positive_gt_count"] += int(merging.get("eligible_positive_gt_count", 0))
+
+        metrics = summary["metrics_by_iou"]["0.25"]
+        for field in auxiliary:
+            auxiliary[field] += int(metrics[field])
+
+    totals["precision"] = _safe_ratio(totals["tp"], totals["tp"] + totals["fp"])
+    totals["recall"] = _safe_ratio(totals["tp"], totals["tp"] + totals["fn"])
+    totals["f1"] = _safe_f1(totals["tp"], totals["fp"], totals["fn"])
+    totals["merging_rate"] = _safe_ratio(
+        totals["merged_positive_gt_count"], totals["eligible_positive_gt_count"]
+    )
+    return {
+        "variant": variant_name,
+        "num_frames": len(reports),
+        "primary_iou_0_50": totals,
+        "auxiliary_iou_0_25": auxiliary,
+    }
+
+
+def validate_variant_batch_results(reports_by_variant):
+    if tuple(reports_by_variant) != VARIANT_ORDER:
+        raise ValueError("variant reports must contain C0, C1, C2, C3 in order")
+    eligible_gate = compare_eligible_gt_sets(reports_by_variant)
+    if not eligible_gate["passed"]:
+        raise ValueError(f"eligible positive GT set mismatch: {eligible_gate['mismatches']}")
+    return {
+        "passed": True,
+        "eligible_gt_gate": eligible_gate,
+        "frame_counts": {name: len(reports) for name, reports in reports_by_variant.items()},
+    }
+
+
+def rank_variant_summaries(summaries):
+    return sorted(
+        summaries,
+        key=lambda item: (
+            -int(item["primary_iou_0_50"]["tp"]),
+            int(item["primary_iou_0_50"]["fp"]),
+            float(item["primary_iou_0_50"]["merging_rate"] or float("inf")),
+            str(item["variant"]),
+        ),
+    )
+
+
+def _safe_ratio(numerator, denominator):
+    return float(numerator / denominator) if denominator else None
+
+
+def _safe_f1(tp, fp, fn):
+    denominator = 2 * tp + fp + fn
+    return float(2 * tp / denominator) if denominator else None

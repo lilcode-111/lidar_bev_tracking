@@ -31,3 +31,5 @@ n_cg >= max(3, ceil(0.10 * N_g))
 ## 预注册边界
 
 `preregister_variant_specs()` 只记录配置和冻结字段，不根据指标自动挑选参数。所有 variant 的 eligible GT 集合必须与 C0 一致，否则实验直接不通过。
+
+Day6 将使用这些 variant report 汇总 TP/FP/FN、F1、zero-detection 和 merging rate，并按固定规则输出诊断排序。排序结果只能用于分析，不能替代四方评审对 release candidate 的确认。

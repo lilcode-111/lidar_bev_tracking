@@ -4,10 +4,13 @@ import numpy as np
 
 from bev_tracking.adaptive_experiment import (
     VariantSpec,
+    aggregate_variant_reports,
     build_gt_cluster_associations,
     compare_eligible_gt_sets,
     preregister_variant_specs,
     summarize_merging,
+    rank_variant_summaries,
+    validate_variant_batch_results,
     validate_variant_specs,
 )
 from bev_tracking.clustering_policy import ClusteringPolicy
@@ -83,6 +86,37 @@ class AdaptiveExperimentTest(unittest.TestCase):
         result = compare_eligible_gt_sets(reports)
         self.assertFalse(result["passed"])
         self.assertIn("C2", result["mismatches"])
+
+    def test_variant_aggregation_keeps_primary_and_auxiliary_metrics(self):
+        report = {
+            "frame_id": "1",
+            "summary": {
+                "num_positive_gt": 2,
+                "metrics_by_iou": {
+                    "0.50": {"tp": 1, "fp": 2, "fn": 1, "neutralized_detections": 0, "effective_car_detection_count": 3},
+                    "0.25": {"tp": 2, "fp": 1, "fn": 0, "neutralized_detections": 0},
+                },
+                "candidate_coverage": {"zero_detection_with_gt_eligible_count": 1},
+                "merging": {"merged_positive_gt_count": 1, "eligible_positive_gt_count": 2},
+            },
+        }
+        summary = aggregate_variant_reports("C0", [report])
+        self.assertEqual(summary["primary_iou_0_50"]["tp"], 1)
+        self.assertEqual(summary["auxiliary_iou_0_25"]["tp"], 2)
+        self.assertAlmostEqual(summary["primary_iou_0_50"]["f1"], 0.4)
+
+    def test_variant_batch_gate_and_ranking_are_deterministic(self):
+        base = [{"frame_id": "1", "gt_cluster_associations": [{"gt_id": "gt_1", "eligible": True}]}]
+        reports = {name: base for name in ["C0", "C1", "C2", "C3"]}
+        gate = validate_variant_batch_results(reports)
+        self.assertTrue(gate["passed"])
+        ranked = rank_variant_summaries(
+            [
+                {"variant": "C1", "primary_iou_0_50": {"tp": 2, "fp": 4, "merging_rate": 0.2}},
+                {"variant": "C0", "primary_iou_0_50": {"tp": 2, "fp": 3, "merging_rate": 0.2}},
+            ]
+        )
+        self.assertEqual([item["variant"] for item in ranked], ["C0", "C1"])
 
 
 if __name__ == "__main__":
