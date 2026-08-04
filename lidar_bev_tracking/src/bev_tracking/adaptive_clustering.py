@@ -16,6 +16,34 @@ from bev_tracking.clustering_policy import ClusteringPolicy, pairwise_eps
 DISTANCE_TOLERANCE_M = 1e-6
 
 
+def cluster_points(points, policy, implementation="grid"):
+    """Unified clustering entry point with an explicit fixed/adaptive path."""
+    if not isinstance(policy, ClusteringPolicy):
+        raise TypeError("policy must be a ClusteringPolicy")
+
+    if policy.mode == "fixed":
+        # Keep C0 byte-for-byte aligned with the frozen legacy implementation.
+        from bev_tracking.clustering_detector import euclidean_cluster
+
+        return euclidean_cluster(points, eps=policy.eps, min_points=policy.min_points)
+
+    parameters = point_parameters(points, policy)
+    if implementation == "brute_force":
+        neighbors = brute_force_neighbors(points, parameters)
+    elif implementation == "grid":
+        neighbors = adaptive_grid_neighbors(points, parameters, policy.global_max_eps)
+    else:
+        raise ValueError("implementation must be grid or brute_force")
+    return cluster_from_neighbors(points, neighbors, parameters)
+
+
+def clusters_equal(reference_clusters, candidate_clusters):
+    """Compare ordered cluster membership and point values exactly."""
+    if len(reference_clusters) != len(candidate_clusters):
+        return False
+    return all(np.array_equal(reference, candidate) for reference, candidate in zip(reference_clusters, candidate_clusters))
+
+
 def point_parameters(points, policy):
     points = np.asarray(points)
     if points.ndim != 2 or points.shape[1] < 2:

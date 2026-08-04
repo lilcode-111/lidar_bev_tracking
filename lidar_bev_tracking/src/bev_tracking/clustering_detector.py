@@ -188,6 +188,7 @@ def detect_objects_from_points(
     z_min=DEFAULT_Z_MIN,
     intensity_min=DEFAULT_INTENSITY_MIN,
     return_trace=False,
+    clustering_policy=None,
 ):
     stages = split_obstacle_filter_stages(
         points,
@@ -195,7 +196,14 @@ def detect_objects_from_points(
         intensity_min=intensity_min,
     )
     obstacle_points = stages["intensity_filter"]
-    clusters = euclidean_cluster(obstacle_points, eps=eps, min_points=min_points)
+    if clustering_policy is None:
+        clusters = euclidean_cluster(obstacle_points, eps=eps, min_points=min_points)
+        clustering_mode = "legacy_fixed"
+    else:
+        from bev_tracking.adaptive_clustering import cluster_points
+
+        clusters = cluster_points(obstacle_points, clustering_policy)
+        clustering_mode = clustering_policy.mode
     box_fn = cluster_to_oriented_box if oriented else cluster_to_box
     detections = [box_fn(cluster, idx + 1) for idx, cluster in enumerate(clusters)]
     if not return_trace:
@@ -211,6 +219,7 @@ def detect_objects_from_points(
             "oriented": bool(oriented),
             "z_min": float(z_min),
             "intensity_min": float(intensity_min),
+            "clustering_mode": clustering_mode,
         },
     }
     return detections, trace
