@@ -1,3 +1,6 @@
 
 # Generated batch evaluation runs
 /outputs/kitti_batch_eval/
+
+# Generated clustering diagnostic replay reports
+/outputs/clustering_diagnostic/
