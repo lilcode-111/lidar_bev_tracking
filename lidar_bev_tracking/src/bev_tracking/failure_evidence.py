@@ -1,4 +1,5 @@
 from collections import Counter
+import hashlib
 
 import numpy as np
 
@@ -33,6 +34,7 @@ def build_failure_evidence_report(
     eval_iou_threshold=0.5,
     auxiliary_iou_thresholds=(0.25,),
     source_run_id=None,
+    clustering_policy=None,
 ):
     frame_id = str(frame_id).zfill(6)
     stages = split_obstacle_filter_stages(
@@ -40,7 +42,12 @@ def build_failure_evidence_report(
         z_min=z_min,
         intensity_min=intensity_min,
     )
-    clusters = euclidean_cluster(stages["intensity_filter"], eps=eps, min_points=min_points)
+    if clustering_policy is None:
+        clusters = euclidean_cluster(stages["intensity_filter"], eps=eps, min_points=min_points)
+    else:
+        from bev_tracking.adaptive_clustering import cluster_points
+
+        clusters = cluster_points(stages["intensity_filter"], clustering_policy)
     box_fn = cluster_to_oriented_box if oriented else cluster_to_box
     raw_detections = [box_fn(cluster, index + 1) for index, cluster in enumerate(clusters)]
     detections_after_nms = nms_bev(raw_detections, iou_threshold=nms_iou_threshold)
@@ -125,6 +132,8 @@ def build_failure_evidence_report(
         },
         "summary": {
             "stage_point_counts": stage_point_counts,
+            "filtered_point_hash": array_hash(stages["intensity_filter"]),
+            "cluster_signatures": [array_hash(cluster) for cluster in clusters],
             "z_to_intensity_identical": bool(np.array_equal(stages["z_filter"], stages["intensity_filter"])),
             "num_positive_gt": int(len(positive_gt)),
             "num_false_negatives": int(len(false_negative_ids)),
@@ -140,6 +149,11 @@ def build_failure_evidence_report(
         "gt_candidate_records": gt_candidate_records,
         "failure_evidence": [item.to_dict() for item in evidence],
     }
+
+
+def array_hash(array):
+    contiguous = np.ascontiguousarray(array)
+    return hashlib.sha256(contiguous.tobytes()).hexdigest()
 
 
 def evaluation_matched_gt_ids_by_iou(evaluation):
