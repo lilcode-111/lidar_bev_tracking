@@ -62,6 +62,38 @@ def preregister_variant_specs(specs):
     }
 
 
+def variant_specs_from_config(config):
+    if not isinstance(config, dict) or not isinstance(config.get("variants"), dict):
+        raise ValueError("config must contain a variants mapping")
+    specs = {}
+    for name in VARIANT_ORDER:
+        raw = config["variants"].get(name)
+        if not isinstance(raw, dict):
+            raise ValueError(f"missing variant config: {name}")
+        mode = raw.get("mode", "fixed")
+        if mode == "adaptive":
+            policy = ClusteringPolicy(
+                mode="adaptive",
+                global_max_eps=float(raw.get("global_max_eps", 0.85)),
+                distance_params=raw.get("distance_params"),
+            )
+        else:
+            policy = ClusteringPolicy(
+                mode="fixed",
+                eps=float(raw.get("eps", 0.6)),
+                min_points=int(raw.get("min_points", 20)),
+                global_max_eps=float(raw.get("global_max_eps", 0.85)),
+            )
+        specs[name] = VariantSpec(
+            name=name,
+            policy=policy,
+            intensity_min=float(raw.get("intensity_min", 0.38)),
+            z_min=float(raw.get("z_min", -0.9)),
+        )
+    validate_variant_specs(specs)
+    return specs
+
+
 def positive_gt_boxes(gt_boxes):
     return [box for box in gt_boxes if classify_gt_box(box) == "positive"]
 
