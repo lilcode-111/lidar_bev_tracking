@@ -19,4 +19,4 @@ PYTHONPATH=src python scripts/run_clustering_ablation.py \
   --output outputs/clustering_diagnostic/c0_c3_comparison.json
 ```
 
-配置文件必须显式包含 `variants.C0`、`C1`、`C2`、`C3`。本日不提供未经评审确认的 C1/C2/C3 数值。
+正式配置文件为 `configs/experiments/v15/c123_preregistered.yaml`，已冻结 C1/C2/C3 的 near/mid/far 参数。运行前不得修改该文件中的算法参数。

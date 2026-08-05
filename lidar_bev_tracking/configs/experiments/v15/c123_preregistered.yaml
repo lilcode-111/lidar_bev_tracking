@@ -1,0 +1,77 @@
+schema_version: "15.2-clustering-preregistration"
+experiment_id: "v15_2_c0_c1_c2_c3"
+
+protocol:
+  distance_metric: "range_xy"
+  range_formula: "sqrt(x^2 + y^2)"
+  pairwise_eps_rule: "max"
+  neighbor_distance_inclusive: true
+  distance_comparison_atol: 1.0e-12
+  global_max_eps: 0.85
+  min_points_includes_self: true
+  registered_before_run: true
+  no_posthoc_parameter_changes: true
+
+frozen:
+  intensity_min: 0.38
+  z_min: -0.9
+  nms_iou_threshold: 0.30
+  primary_iou: 0.50
+  auxiliary_iou: 0.25
+
+variants:
+  C0:
+    mode: fixed
+    eps: 0.60
+    min_points: 20
+    global_max_eps: 0.85
+    intensity_min: 0.38
+    z_min: -0.9
+
+  C1:
+    mode: adaptive
+    global_max_eps: 0.85
+    intensity_min: 0.38
+    z_min: -0.9
+    distance_params:
+      near_0_15:
+        eps: 0.60
+        min_points: 16
+      mid_15_30:
+        eps: 0.60
+        min_points: 10
+      far_30_inf:
+        eps: 0.60
+        min_points: 6
+
+  C2:
+    mode: adaptive
+    global_max_eps: 0.85
+    intensity_min: 0.38
+    z_min: -0.9
+    distance_params:
+      near_0_15:
+        eps: 0.50
+        min_points: 20
+      mid_15_30:
+        eps: 0.70
+        min_points: 20
+      far_30_inf:
+        eps: 0.85
+        min_points: 20
+
+  C3:
+    mode: adaptive
+    global_max_eps: 0.85
+    intensity_min: 0.38
+    z_min: -0.9
+    distance_params:
+      near_0_15:
+        eps: 0.50
+        min_points: 16
+      mid_15_30:
+        eps: 0.70
+        min_points: 10
+      far_30_inf:
+        eps: 0.85
+        min_points: 6

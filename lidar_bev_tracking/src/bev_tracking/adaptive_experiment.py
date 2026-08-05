@@ -192,7 +192,14 @@ def compare_eligible_gt_sets(reports_by_variant):
         for name, current in sets.items()
         if current != reference
     }
-    return {"passed": not mismatches, "eligible_gt_by_variant": sets, "mismatches": mismatches}
+    return {
+        "passed": not mismatches,
+        "eligible_gt_by_variant": {
+            name: sorted(values)
+            for name, values in sets.items()
+        },
+        "mismatches": mismatches,
+    }
 
 
 def aggregate_variant_reports(variant_name, reports):

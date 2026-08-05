@@ -8,7 +8,7 @@
 两者都执行同一条冻结规则：
 
 ```text
-distance(i, j) <= max(eps_i, eps_j) + 1e-6
+distance(i, j) <= max(eps_i, eps_j) + 1e-12
 ```
 
 邻域结果必须满足：

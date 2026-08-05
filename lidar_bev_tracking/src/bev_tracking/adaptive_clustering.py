@@ -13,7 +13,7 @@ import numpy as np
 from bev_tracking.clustering_policy import ClusteringPolicy, pairwise_eps
 
 
-DISTANCE_TOLERANCE_M = 1e-6
+DISTANCE_TOLERANCE_M = 1e-12
 
 
 def cluster_points(points, policy, implementation="grid"):
