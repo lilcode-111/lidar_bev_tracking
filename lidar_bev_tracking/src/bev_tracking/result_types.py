@@ -97,6 +97,63 @@ class FailureReason(StableStrEnum):
     UNRESOLVED = "unresolved"
 
 
+class CandidateConversionState(StableStrEnum):
+    """The single terminal state assigned to each positive GT in v15.3."""
+
+    NO_FILTERED_POINTS = "no_filtered_points"
+    INSUFFICIENT_FILTERED_POINTS_FOR_ASSOCIATION = "insufficient_filtered_points_for_association"
+    NO_ASSOCIATED_CLUSTER = "no_associated_cluster"
+    REJECTED_BY_CAR_CLASSIFIER = "rejected_by_car_classifier"
+    REMOVED_BY_NMS = "removed_by_nms"
+    BOX_IOU_BELOW_0_25 = "box_iou_below_0_25"
+    BOX_IOU_0_25_TO_0_50 = "box_iou_0_25_to_0_50"
+    IOU_GE_0_50_BUT_UNMATCHED = "iou_ge_0_50_but_unmatched"
+    MATCHED_AT_0_50 = "matched_at_0_50"
+
+
+@dataclass
+class CandidateConversionEvidence:
+    """Immutable-style serializable container for one GT's v15.3 lineage."""
+
+    frame_id: str
+    gt_id: str
+    terminal_state: CandidateConversionState | str
+    variant: str
+    distance_bin: str | None = None
+    stage_point_counts: dict = field(default_factory=dict)
+    cluster_ids: list[str] = field(default_factory=list)
+    raw_detection_ids: list[str] = field(default_factory=list)
+    car_detection_ids_before_nms: list[str] = field(default_factory=list)
+    car_detection_ids_after_nms: list[str] = field(default_factory=list)
+    candidate_branches: list[dict] = field(default_factory=list)
+    best_iou_before_nms: float = 0.0
+    best_iou_after_nms: float = 0.0
+    matched_at_primary_iou: bool = False
+    source_run_id: str | None = None
+
+    def __post_init__(self):
+        self.terminal_state = CandidateConversionState(self.terminal_state)
+
+    def to_dict(self):
+        return {
+            "frame_id": str(self.frame_id).zfill(6),
+            "gt_id": str(self.gt_id),
+            "terminal_state": self.terminal_state.value,
+            "variant": str(self.variant),
+            "distance_bin": self.distance_bin,
+            "stage_point_counts": to_json_compatible(self.stage_point_counts),
+            "cluster_ids": [str(value) for value in self.cluster_ids],
+            "raw_detection_ids": [str(value) for value in self.raw_detection_ids],
+            "car_detection_ids_before_nms": [str(value) for value in self.car_detection_ids_before_nms],
+            "car_detection_ids_after_nms": [str(value) for value in self.car_detection_ids_after_nms],
+            "candidate_branches": to_json_compatible(self.candidate_branches),
+            "best_iou_before_nms": float(self.best_iou_before_nms),
+            "best_iou_after_nms": float(self.best_iou_after_nms),
+            "matched_at_primary_iou": bool(self.matched_at_primary_iou),
+            "source_run_id": to_json_compatible(self.source_run_id),
+        }
+
+
 @dataclass
 class FilterStageCounts:
     raw: int = 0
