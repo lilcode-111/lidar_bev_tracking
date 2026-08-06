@@ -12,6 +12,7 @@ from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 
 
 VARIANT_ORDER = ("C0", "C1", "C2", "C3")
+DISTANCE_BIN_ORDER = ("near_0_15", "mid_15_30", "far_30_inf")
 MIN_GT_POINTS_FOR_MERGING = 3
 MIN_CLUSTER_POINTS_IN_GT = 3
 MIN_GT_CLUSTER_FRACTION = 0.10
@@ -274,6 +275,92 @@ def rank_variant_summaries(summaries):
             str(item["variant"]),
         ),
     )
+
+
+def aggregate_distance_analysis(reports):
+    """Aggregate GT candidate coverage and outcomes by frozen distance bin."""
+    bins = {
+        name: {
+            "gt_count": 0,
+            "tp_iou_0_50": 0,
+            "fn_iou_0_50": 0,
+            "tp_iou_0_25": 0,
+            "fn_iou_0_25": 0,
+            "gt_with_cluster": 0,
+            "gt_with_car_candidate": 0,
+            "zero_detection_with_gt": 0,
+            "candidate_outcome_counts": {},
+        }
+        for name in DISTANCE_BIN_ORDER
+    }
+    for report in reports:
+        for record in report.get("gt_candidate_records", []):
+            distance_bin = record.get("distance_bin")
+            if distance_bin not in bins:
+                raise ValueError(f"unknown distance bin: {distance_bin}")
+            target = bins[distance_bin]
+            target["gt_count"] += 1
+            matched = record.get("matched_by_iou", {})
+            target["tp_iou_0_50"] += int(bool(matched.get("0.50", False)))
+            target["tp_iou_0_25"] += int(bool(matched.get("0.25", False)))
+            target["gt_with_cluster"] += int(bool(record.get("cluster_ids")))
+            target["gt_with_car_candidate"] += int(bool(record.get("car_detection_ids_after_nms")))
+            target["zero_detection_with_gt"] += int(not record.get("car_detection_ids_after_nms"))
+            outcome = record.get("candidate_outcome", "unknown")
+            target["candidate_outcome_counts"][outcome] = target["candidate_outcome_counts"].get(outcome, 0) + 1
+
+    for target in bins.values():
+        target["fn_iou_0_50"] = target["gt_count"] - target["tp_iou_0_50"]
+        target["fn_iou_0_25"] = target["gt_count"] - target["tp_iou_0_25"]
+        denominator = target["gt_count"]
+        target["cluster_coverage"] = _safe_ratio(target["gt_with_cluster"], denominator)
+        target["car_candidate_coverage"] = _safe_ratio(target["gt_with_car_candidate"], denominator)
+        target["zero_detection_ratio"] = _safe_ratio(target["zero_detection_with_gt"], denominator)
+        target["candidate_outcome_counts"] = dict(sorted(target["candidate_outcome_counts"].items()))
+    return bins
+
+
+def build_variant_diagnostics(reports):
+    """Keep compact frame/GT evidence needed to explain aggregate changes."""
+    frames = []
+    gt_records = []
+    for report in reports:
+        summary = report["summary"]
+        primary = summary["metrics_by_iou"]["0.50"]
+        auxiliary = summary["metrics_by_iou"]["0.25"]
+        frames.append(
+            {
+                "frame_id": str(report["frame_id"]).zfill(6),
+                "tp_iou_0_50": int(primary["tp"]),
+                "fp_iou_0_50": int(primary["fp"]),
+                "fn_iou_0_50": int(primary["fn"]),
+                "tp_iou_0_25": int(auxiliary["tp"]),
+                "fp_iou_0_25": int(auxiliary["fp"]),
+                "fn_iou_0_25": int(auxiliary["fn"]),
+                "effective_car_detection_count": int(primary["effective_car_detection_count"]),
+                "candidate_generation": summary.get("candidate_generation", {}),
+                "primary_reason_counts": summary.get("primary_reason_counts", {}),
+            }
+        )
+        for record in report.get("gt_candidate_records", []):
+            gt_records.append(
+                {
+                    "frame_id": str(report["frame_id"]).zfill(6),
+                    "gt_id": str(record["gt_id"]),
+                    "distance_bin": record.get("distance_bin"),
+                    "stage_point_counts": record.get("stage_point_counts", {}),
+                    "cluster_ids": list(record.get("cluster_ids", [])),
+                    "car_detection_ids_after_nms": list(record.get("car_detection_ids_after_nms", [])),
+                    "best_iou_after_nms": float(record.get("best_iou_after_nms", 0.0)),
+                    "matched_by_iou": dict(record.get("matched_by_iou", {})),
+                    "candidate_outcome": record.get("candidate_outcome"),
+                }
+            )
+    return {
+        "frames": frames,
+        "gt_records": gt_records,
+        "distance_analysis": aggregate_distance_analysis(reports),
+    }
 
 
 def _safe_ratio(numerator, denominator):

@@ -20,3 +20,5 @@ PYTHONPATH=src python scripts/run_clustering_ablation.py \
 ```
 
 正式配置文件为 `configs/experiments/v15/c123_preregistered.yaml`，已冻结 C1/C2/C3 的 near/mid/far 参数。运行前不得修改该文件中的算法参数。
+
+运行结果还会写入 `diagnostics`，包含逐帧指标、逐 GT candidate outcome 和 near/mid/far 距离段统计，用于解释 TP/FP 变化来源。
