@@ -18,6 +18,12 @@ from bev_tracking.result_types import CandidateConversionEvidence, CandidateConv
 
 PRIMARY_IOU = 0.50
 AUXILIARY_IOU = 0.25
+CANDIDATE_CONVERSION_SCHEMA_VERSION = "15.3.1"
+CANDIDATE_CONVERSION_SOURCE_OF_TRUTH = "candidate_conversion.evidence"
+DEPRECATED_FRAME_REPORT_FIELDS = (
+    "gt_candidate_records",
+    "failure_evidence",
+)
 
 
 def derive_terminal_state(
@@ -144,11 +150,21 @@ def build_candidate_conversion_evidence(
     nms_trace = trace_nms_suppression(raw_detections, detections_after_nms)
     best_before = max((float(bev_iou(gt_box, det)) for det in car_before), default=0.0)
     best_after = max((float(bev_iou(gt_box, det)) for det in associated_after), default=0.0)
-    matched_ids = {
-        str(item.get("det_id"))
-        for item in evaluation.get("matches", [])
-        if str(item.get("gt_id")) == str(gt_box.get("id"))
+    primary_iou_key = f'{float(evaluation.get("iou_threshold", PRIMARY_IOU)):.2f}'
+    matched_ids_by_iou = {
+        primary_iou_key: {
+            str(item.get("det_id"))
+            for item in evaluation.get("matches", [])
+            if str(item.get("gt_id")) == str(gt_box.get("id"))
+        }
     }
+    for iou_key, auxiliary in evaluation.get("auxiliary", {}).items():
+        matched_ids_by_iou[iou_key] = {
+            str(item.get("det_id"))
+            for item in auxiliary.get("matches", [])
+            if str(item.get("gt_id")) == str(gt_box.get("id"))
+        }
+    matched_ids = matched_ids_by_iou.get(primary_iou_key, set())
     matched = bool(matched_ids & associated_after_ids)
     downstream = build_downstream_attribution(
         gt_box=gt_box,
@@ -189,6 +205,7 @@ def build_candidate_conversion_evidence(
         downstream_attribution=downstream,
         best_iou_before_nms=best_before,
         best_iou_after_nms=best_after,
+        matched_by_iou={key: bool(ids & associated_after_ids) for key, ids in matched_ids_by_iou.items()},
         matched_at_primary_iou=matched,
         source_run_id=source_run_id,
     )
@@ -226,12 +243,40 @@ def build_candidate_conversion_report(
     ]
     counts = validate_terminal_assignments(records, [box["id"] for box in positive_gt])
     return {
+        "schema_version": CANDIDATE_CONVERSION_SCHEMA_VERSION,
+        "source_of_truth": CANDIDATE_CONVERSION_SOURCE_OF_TRUTH,
+        "deprecated_fields": list(DEPRECATED_FRAME_REPORT_FIELDS),
         "frame_id": str(frame_id).zfill(6),
         "variant": str(variant),
         "num_positive_gt": len(positive_gt),
         "terminal_state_counts": counts,
         "evidence": [record.to_dict() for record in records],
     }
+
+
+def validate_candidate_conversion_payload(payload):
+    """Validate the frozen 15.3.1 canonical evidence contract."""
+    if not isinstance(payload, dict):
+        raise ValueError("candidate conversion payload must be a dictionary")
+    if payload.get("schema_version") != CANDIDATE_CONVERSION_SCHEMA_VERSION:
+        raise ValueError("unsupported candidate conversion schema version")
+    if payload.get("source_of_truth") != CANDIDATE_CONVERSION_SOURCE_OF_TRUTH:
+        raise ValueError("candidate conversion source_of_truth is invalid")
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list):
+        raise ValueError("candidate conversion evidence must be a list")
+    keys = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError("candidate conversion evidence item must be a dictionary")
+        key = (str(item.get("frame_id")), str(item.get("gt_id")))
+        keys.append(key)
+    if len(keys) != len(set(keys)):
+        raise ValueError("candidate conversion evidence contains duplicate frame/GT")
+    expected = payload.get("num_positive_gt")
+    if expected != len(evidence):
+        raise ValueError("candidate conversion evidence count does not match num_positive_gt")
+    return True
 
 
 def _yaw_error(yaw_a, yaw_b):

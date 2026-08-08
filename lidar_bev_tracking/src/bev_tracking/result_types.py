@@ -129,6 +129,7 @@ class CandidateConversionEvidence:
     downstream_attribution: dict = field(default_factory=dict)
     best_iou_before_nms: float = 0.0
     best_iou_after_nms: float = 0.0
+    matched_by_iou: dict = field(default_factory=dict)
     matched_at_primary_iou: bool = False
     source_run_id: str | None = None
 
@@ -151,6 +152,7 @@ class CandidateConversionEvidence:
             "downstream_attribution": to_json_compatible(self.downstream_attribution),
             "best_iou_before_nms": float(self.best_iou_before_nms),
             "best_iou_after_nms": float(self.best_iou_after_nms),
+            "matched_by_iou": to_json_compatible(self.matched_by_iou),
             "matched_at_primary_iou": bool(self.matched_at_primary_iou),
             "source_run_id": to_json_compatible(self.source_run_id),
         }

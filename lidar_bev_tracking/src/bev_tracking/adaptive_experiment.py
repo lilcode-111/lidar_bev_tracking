@@ -291,12 +291,16 @@ def aggregate_distance_analysis(reports):
             "gt_with_cluster": 0,
             "gt_with_car_candidate": 0,
             "zero_detection_with_gt": 0,
-            "candidate_outcome_counts": {},
+            "terminal_state_counts": {},
         }
         for name in DISTANCE_BIN_ORDER
     }
     for report in reports:
-        for record in report.get("gt_candidate_records", []):
+        conversion = report.get("candidate_conversion") or {}
+        records = conversion.get("evidence")
+        if not isinstance(records, list):
+            raise ValueError(f"missing canonical candidate conversion evidence: {report.get('frame_id')}")
+        for record in records:
             distance_bin = record.get("distance_bin")
             if distance_bin not in bins:
                 raise ValueError(f"unknown distance bin: {distance_bin}")
@@ -308,8 +312,10 @@ def aggregate_distance_analysis(reports):
             target["gt_with_cluster"] += int(bool(record.get("cluster_ids")))
             target["gt_with_car_candidate"] += int(bool(record.get("car_detection_ids_after_nms")))
             target["zero_detection_with_gt"] += int(not record.get("car_detection_ids_after_nms"))
-            outcome = record.get("candidate_outcome", "unknown")
-            target["candidate_outcome_counts"][outcome] = target["candidate_outcome_counts"].get(outcome, 0) + 1
+            terminal_state = record.get("terminal_state", "unknown")
+            target["terminal_state_counts"][terminal_state] = (
+                target["terminal_state_counts"].get(terminal_state, 0) + 1
+            )
 
     for target in bins.values():
         target["fn_iou_0_50"] = target["gt_count"] - target["tp_iou_0_50"]
@@ -318,16 +324,19 @@ def aggregate_distance_analysis(reports):
         target["cluster_coverage"] = _safe_ratio(target["gt_with_cluster"], denominator)
         target["car_candidate_coverage"] = _safe_ratio(target["gt_with_car_candidate"], denominator)
         target["zero_detection_ratio"] = _safe_ratio(target["zero_detection_with_gt"], denominator)
-        target["candidate_outcome_counts"] = dict(sorted(target["candidate_outcome_counts"].items()))
+        target["terminal_state_counts"] = dict(sorted(target["terminal_state_counts"].items()))
     return bins
 
 
 def build_variant_diagnostics(reports):
-    """Keep compact frame/GT evidence needed to explain aggregate changes."""
+    """Build compact diagnostics from candidate_conversion.evidence only."""
     frames = []
-    gt_records = []
     conversion_records = []
     for report in reports:
+        conversion = report.get("candidate_conversion") or {}
+        records = conversion.get("evidence")
+        if not isinstance(records, list):
+            raise ValueError(f"missing canonical candidate conversion evidence: {report.get('frame_id')}")
         summary = report["summary"]
         primary = summary["metrics_by_iou"]["0.50"]
         auxiliary = summary["metrics_by_iou"]["0.25"]
@@ -345,25 +354,10 @@ def build_variant_diagnostics(reports):
                 "primary_reason_counts": summary.get("primary_reason_counts", {}),
             }
         )
-        for record in report.get("gt_candidate_records", []):
-            gt_records.append(
-                {
-                    "frame_id": str(report["frame_id"]).zfill(6),
-                    "gt_id": str(record["gt_id"]),
-                    "distance_bin": record.get("distance_bin"),
-                    "stage_point_counts": record.get("stage_point_counts", {}),
-                    "cluster_ids": list(record.get("cluster_ids", [])),
-                    "car_detection_ids_after_nms": list(record.get("car_detection_ids_after_nms", [])),
-                    "best_iou_after_nms": float(record.get("best_iou_after_nms", 0.0)),
-                    "matched_by_iou": dict(record.get("matched_by_iou", {})),
-                    "candidate_outcome": record.get("candidate_outcome"),
-                }
-            )
-        conversion = report.get("candidate_conversion") or {}
-        conversion_records.extend(conversion.get("evidence", []))
+        conversion_records.extend(records)
     return {
         "frames": frames,
-        "gt_records": gt_records,
+        "candidate_conversion_evidence": conversion_records,
         "distance_analysis": aggregate_distance_analysis(reports),
         "candidate_conversion_analysis": summarize_candidate_conversion_records(conversion_records)
         if conversion_records
