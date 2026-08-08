@@ -500,3 +500,81 @@ def summarize_candidate_conversion_records(records):
         "classification_audit": classification,
         "terminal_state_counts": terminal_states,
     }
+
+
+def build_candidate_conversion_delta(reports_by_variant, base_variant="C0", candidate_variant="C1"):
+    """Compare canonical GT evidence and explain newly associated candidate GTs."""
+    def index_evidence(reports, variant):
+        indexed = {}
+        for report in reports:
+            conversion = report.get("candidate_conversion") or {}
+            records = conversion.get("evidence")
+            if not isinstance(records, list):
+                raise ValueError(f"missing canonical evidence for {variant}: {report.get('frame_id')}")
+            for record in records:
+                key = (str(record.get("frame_id")).zfill(6), str(record.get("gt_id")))
+                if key in indexed:
+                    raise ValueError(f"duplicate canonical GT evidence: {variant} {key}")
+                indexed[key] = record
+        return indexed
+
+    if base_variant not in reports_by_variant or candidate_variant not in reports_by_variant:
+        raise ValueError("delta cohort requires base and candidate variants")
+    base = index_evidence(reports_by_variant[base_variant], base_variant)
+    candidate = index_evidence(reports_by_variant[candidate_variant], candidate_variant)
+    if set(base) != set(candidate):
+        raise ValueError("base and candidate GT evidence sets differ")
+
+    added_keys = sorted(
+        key for key in candidate
+        if bool(candidate[key].get("cluster_ids")) and not bool(base[key].get("cluster_ids"))
+    )
+    terminal_counts = Counter(candidate[key].get("terminal_state", "unknown") for key in added_keys)
+    stage_counts = {
+        "car_classification_pass": 0,
+        "rejected_by_car_classifier": 0,
+        "removed_by_nms": 0,
+        "iou_below_0_25": 0,
+        "iou_0_25_to_0_50": 0,
+        "iou_ge_0_50": 0,
+        "matched_at_0_50": 0,
+    }
+    cohort = []
+    for frame_id, gt_id in added_keys:
+        before = base[(frame_id, gt_id)]
+        after = candidate[(frame_id, gt_id)]
+        terminal = after.get("terminal_state", "unknown")
+        has_car_before = bool(after.get("car_detection_ids_before_nms"))
+        stage_counts["car_classification_pass"] += int(has_car_before)
+        stage_counts["rejected_by_car_classifier"] += int(terminal == "rejected_by_car_classifier")
+        stage_counts["removed_by_nms"] += int(terminal == "removed_by_nms")
+        stage_counts["iou_below_0_25"] += int(terminal == "box_iou_below_0_25")
+        stage_counts["iou_0_25_to_0_50"] += int(terminal == "box_iou_0_25_to_0_50")
+        stage_counts["iou_ge_0_50"] += int(terminal in {"iou_ge_0_50_but_unmatched", "matched_at_0_50"})
+        stage_counts["matched_at_0_50"] += int(terminal == "matched_at_0_50")
+        cohort.append({
+            "frame_id": frame_id,
+            "gt_id": gt_id,
+            "base_variant": {
+                "terminal_state": before.get("terminal_state"),
+                "cluster_ids": list(before.get("cluster_ids", [])),
+            },
+            "candidate_variant": {
+                "terminal_state": terminal,
+                "cluster_ids": list(after.get("cluster_ids", [])),
+                "car_detection_ids_before_nms": list(after.get("car_detection_ids_before_nms", [])),
+                "car_detection_ids_after_nms": list(after.get("car_detection_ids_after_nms", [])),
+                "best_iou_after_nms": float(after.get("best_iou_after_nms", 0.0)),
+                "matched_by_iou": dict(after.get("matched_by_iou", {})),
+            },
+        })
+    return {
+        "base_variant": base_variant,
+        "candidate_variant": candidate_variant,
+        "base_associated_gt_count": sum(bool(item.get("cluster_ids")) for item in base.values()),
+        "candidate_associated_gt_count": sum(bool(item.get("cluster_ids")) for item in candidate.values()),
+        "new_associated_gt_count": len(cohort),
+        "terminal_state_counts": dict(sorted(terminal_counts.items())),
+        "conversion_stage_counts": stage_counts,
+        "records": cohort,
+    }
