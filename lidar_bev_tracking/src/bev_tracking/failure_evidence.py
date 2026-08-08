@@ -35,6 +35,7 @@ def build_failure_evidence_report(
     auxiliary_iou_thresholds=(0.25,),
     source_run_id=None,
     clustering_policy=None,
+    candidate_variant=None,
 ):
     frame_id = str(frame_id).zfill(6)
     stages = split_obstacle_filter_stages(
@@ -116,6 +117,22 @@ def build_failure_evidence_report(
         "neutralized_detection_count": int(primary_metrics["neutralized_detections"]),
         "effective_car_detection_count": int(primary_metrics["effective_car_detection_count"]),
     }
+    candidate_conversion = None
+    if candidate_variant is not None:
+        from bev_tracking.candidate_conversion import build_candidate_conversion_report
+
+        candidate_conversion = build_candidate_conversion_report(
+            frame_id=frame_id,
+            gt_boxes=gt_boxes,
+            stages=stages,
+            clusters=clusters,
+            raw_detections=raw_detections,
+            detections_after_nms=detections_after_nms,
+            evaluation=evaluation,
+            variant=candidate_variant,
+            min_points=min_points,
+            source_run_id=source_run_id,
+        )
 
     return {
         "schema_version": FAILURE_EVIDENCE_SCHEMA_VERSION,
@@ -148,6 +165,7 @@ def build_failure_evidence_report(
         },
         "gt_candidate_records": gt_candidate_records,
         "failure_evidence": [item.to_dict() for item in evidence],
+        "candidate_conversion": candidate_conversion,
     }
 
 

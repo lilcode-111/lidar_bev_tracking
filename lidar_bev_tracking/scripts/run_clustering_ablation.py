@@ -6,6 +6,7 @@ import yaml
 
 from bev_tracking.adaptive_experiment import (
     aggregate_variant_reports,
+    build_variant_diagnostics,
     preregister_variant_specs,
     rank_variant_summaries,
     run_variant_frame,
@@ -84,6 +85,10 @@ def main():
         "gates": gate,
         "summaries": summaries,
         "ranking": rank_variant_summaries(summaries),
+        "diagnostics": {
+            name: build_variant_diagnostics(reports)
+            for name, reports in reports_by_variant.items()
+        },
     }
     output_path = Path(args.output)
     atomic_write_json(output_path, output)
