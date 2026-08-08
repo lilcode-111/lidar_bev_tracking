@@ -126,6 +126,7 @@ class CandidateConversionEvidence:
     car_detection_ids_before_nms: list[str] = field(default_factory=list)
     car_detection_ids_after_nms: list[str] = field(default_factory=list)
     candidate_branches: list[dict] = field(default_factory=list)
+    downstream_attribution: dict = field(default_factory=dict)
     best_iou_before_nms: float = 0.0
     best_iou_after_nms: float = 0.0
     matched_at_primary_iou: bool = False
@@ -147,6 +148,7 @@ class CandidateConversionEvidence:
             "car_detection_ids_before_nms": [str(value) for value in self.car_detection_ids_before_nms],
             "car_detection_ids_after_nms": [str(value) for value in self.car_detection_ids_after_nms],
             "candidate_branches": to_json_compatible(self.candidate_branches),
+            "downstream_attribution": to_json_compatible(self.downstream_attribution),
             "best_iou_before_nms": float(self.best_iou_before_nms),
             "best_iou_after_nms": float(self.best_iou_after_nms),
             "matched_at_primary_iou": bool(self.matched_at_primary_iou),

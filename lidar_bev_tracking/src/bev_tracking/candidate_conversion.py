@@ -10,7 +10,7 @@ from numbers import Integral
 
 import numpy as np
 
-from bev_tracking.eval_policy import is_positive_detection
+from bev_tracking.eval_policy import assign_det_indices, detection_sort_key, is_positive_detection
 from bev_tracking.geometry import bev_iou
 from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 from bev_tracking.result_types import CandidateConversionEvidence, CandidateConversionState
@@ -141,6 +141,7 @@ def build_candidate_conversion_evidence(
     ]
     associated_after_ids = {str(det.get("id")) for det in car_after}
     associated_after = [det for det in car_after if str(det.get("id")) in associated_after_ids]
+    nms_trace = trace_nms_suppression(raw_detections, detections_after_nms)
     best_before = max((float(bev_iou(gt_box, det)) for det in car_before), default=0.0)
     best_after = max((float(bev_iou(gt_box, det)) for det in associated_after), default=0.0)
     matched_ids = {
@@ -149,6 +150,14 @@ def build_candidate_conversion_evidence(
         if str(item.get("gt_id")) == str(gt_box.get("id"))
     }
     matched = bool(matched_ids & associated_after_ids)
+    downstream = build_downstream_attribution(
+        gt_box=gt_box,
+        associated_after=associated_after,
+        associated_before=car_before,
+        nms_trace=nms_trace,
+        evaluation=evaluation,
+        matched_ids=matched_ids,
+    )
     terminal_state = derive_terminal_state(
         filtered_point_count=filtered_count,
         min_points=min_points,
@@ -177,6 +186,7 @@ def build_candidate_conversion_evidence(
         car_detection_ids_before_nms=[str(det.get("id")) for det in car_before],
         car_detection_ids_after_nms=[str(det.get("id")) for det in car_after],
         candidate_branches=branches,
+        downstream_attribution=downstream,
         best_iou_before_nms=best_before,
         best_iou_after_nms=best_after,
         matched_at_primary_iou=matched,
@@ -221,6 +231,95 @@ def build_candidate_conversion_report(
         "num_positive_gt": len(positive_gt),
         "terminal_state_counts": counts,
         "evidence": [record.to_dict() for record in records],
+    }
+
+
+def _yaw_error(yaw_a, yaw_b):
+    return float(abs((float(yaw_a) - float(yaw_b) + np.pi / 2.0) % np.pi - np.pi / 2.0))
+
+
+def trace_nms_suppression(boxes, kept_boxes, iou_threshold=0.3):
+    """Reconstruct NMS suppressor relationships without changing NMS behavior."""
+    pending = sorted(assign_det_indices(boxes), key=detection_sort_key)
+    expected_kept_ids = {str(box.get("id")) for box in kept_boxes}
+    kept = []
+    suppressed = []
+    while pending:
+        current = pending.pop(0)
+        kept.append(current)
+        remaining = []
+        for box in pending:
+            same_class = box.get("class_name") == current.get("class_name")
+            iou = float(bev_iou(current, box)) if same_class else 0.0
+            if same_class and iou > iou_threshold:
+                suppressed.append({
+                    "suppressed_id": str(box.get("id")),
+                    "suppressor_id": str(current.get("id")),
+                    "iou": iou,
+                })
+            else:
+                remaining.append(box)
+        pending = remaining
+
+    actual_kept_ids = {str(box.get("id")) for box in kept}
+    if actual_kept_ids != expected_kept_ids:
+        raise ValueError("NMS trace does not match supplied kept detections")
+    return {
+        "iou_threshold": float(iou_threshold),
+        "kept_ids": sorted(actual_kept_ids),
+        "suppressed": suppressed,
+    }
+
+
+def build_downstream_attribution(*, gt_box, associated_after, associated_before, nms_trace, evaluation, matched_ids):
+    """Summarize NMS, geometry, and evaluation competition for one GT."""
+    associated_ids = {str(det.get("id")) for det in associated_before}
+    suppression_records = [
+        item for item in nms_trace.get("suppressed", [])
+        if item["suppressed_id"] in associated_ids
+    ]
+    geometry = []
+    for det in associated_after:
+        dx = float(det["x"] - gt_box["x"])
+        dy = float(det["y"] - gt_box["y"])
+        geometry.append({
+            "detection_id": str(det.get("id")),
+            "dx_m": dx,
+            "dy_m": dy,
+            "center_error_m": float(np.hypot(dx, dy)),
+            "length_error_m": float(det["length"] - gt_box["length"]),
+            "width_error_m": float(det["width"] - gt_box["width"]),
+            "yaw_error_rad": _yaw_error(det["yaw"], gt_box["yaw"]),
+            "iou": float(bev_iou(gt_box, det)),
+        })
+    associated_ids_after = {str(det.get("id")) for det in associated_after}
+    matched_associated = sorted(associated_ids_after & set(matched_ids))
+    competing_matches = [
+        {
+            "det_id": str(item.get("det_id")),
+            "gt_id": str(item.get("gt_id")),
+            "iou": float(item.get("iou", 0.0)),
+        }
+        for item in evaluation.get("matches", [])
+        if str(item.get("det_id")) in associated_ids_after
+        and str(item.get("gt_id")) != str(gt_box.get("id"))
+    ]
+    best_geometry = max(geometry, key=lambda item: (item["iou"], item["detection_id"]), default=None)
+    return {
+        "nms": {
+            "associated_suppressed_count": len(suppression_records),
+            "suppression_records": suppression_records,
+        },
+        "geometry": {
+            "candidates": geometry,
+            "best_iou_candidate": best_geometry,
+        },
+        "evaluation": {
+            "matched_associated_detection_ids": matched_associated,
+            "matched_by_associated_candidate": bool(matched_associated),
+            "competition_matches": competing_matches,
+            "iou_ge_0_50_but_unmatched": bool(best_geometry and best_geometry["iou"] >= PRIMARY_IOU and not matched_associated),
+        },
     }
 
 

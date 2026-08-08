@@ -42,7 +42,7 @@ class CandidateConversionDay2Test(unittest.TestCase):
             stages={"raw": np.vstack([cluster_a, cluster_b]), "roi": np.vstack([cluster_a, cluster_b]), "z_filter": np.vstack([cluster_a, cluster_b]), "intensity_filter": np.vstack([cluster_a, cluster_b])},
             clusters=[cluster_a, cluster_b],
             raw_detections=raw,
-            detections_after_nms=[raw[1]],
+            detections_after_nms=raw,
             evaluation={"matches": []},
             variant="C1",
             min_points=20,
