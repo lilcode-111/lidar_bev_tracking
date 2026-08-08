@@ -51,6 +51,22 @@ class CandidateConversionDay5Test(unittest.TestCase):
         )
         self.assertIsNone(report["candidate_conversion"])
 
+    def test_candidate_conversion_uses_evaluation_roi_policy(self):
+        points = np.ones((30, 4), dtype=np.float32)
+        points[:, 0] = 10.0
+        points[:, 1] = 0.0
+        report = build_failure_evidence_report(
+            points,
+            [car_box(), {**car_box(), "id": "gt_outside", "x": 45.0}],
+            frame_id="42",
+            min_points=20,
+            oriented=False,
+            candidate_variant="C0",
+        )
+        conversion = report["candidate_conversion"]
+        self.assertEqual(conversion["num_positive_gt"], 1)
+        self.assertEqual([item["gt_id"] for item in conversion["evidence"]], ["gt_1"])
+
 
 if __name__ == "__main__":
     unittest.main()

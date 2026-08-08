@@ -10,7 +10,7 @@ from numbers import Integral
 
 import numpy as np
 
-from bev_tracking.eval_policy import assign_det_indices, detection_sort_key, is_positive_detection
+from bev_tracking.eval_policy import classify_gt_box, assign_det_indices, detection_sort_key, is_positive_detection
 from bev_tracking.geometry import bev_iou
 from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 from bev_tracking.result_types import CandidateConversionEvidence, CandidateConversionState
@@ -208,7 +208,7 @@ def build_candidate_conversion_report(
     source_run_id=None,
 ):
     """Build evidence for every positive GT and summarize terminal states."""
-    positive_gt = [box for box in gt_boxes if str(box.get("class_name", "")).lower() == "car"]
+    positive_gt = [box for box in gt_boxes if classify_gt_box(box) == "positive"]
     records = [
         build_candidate_conversion_evidence(
             frame_id=frame_id,
