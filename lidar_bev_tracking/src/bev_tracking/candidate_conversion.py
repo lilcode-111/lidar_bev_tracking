@@ -222,3 +222,126 @@ def build_candidate_conversion_report(
         "terminal_state_counts": counts,
         "evidence": [record.to_dict() for record in records],
     }
+
+
+WATERFALL_FIELDS = (
+    "num_positive_gt",
+    "gt_with_filtered_points",
+    "gt_with_associated_cluster",
+    "gt_with_car_before_nms",
+    "gt_with_car_after_nms",
+    "gt_with_associated_iou_ge_0_25",
+    "gt_with_associated_iou_ge_0_50",
+    "gt_matched_at_iou_0_50",
+)
+DISTANCE_BINS = ("near_0_15", "mid_15_30", "far_30_inf", "total")
+
+
+def _empty_waterfall():
+    return {field: 0 for field in WATERFALL_FIELDS}
+
+
+def _ratio_counts(counts):
+    denominator = counts["num_positive_gt"]
+    return {
+        field: None if denominator == 0 else float(value / denominator)
+        for field, value in counts.items()
+        if field != "num_positive_gt"
+    }
+
+
+def _add_waterfall_record(target, record):
+    target["num_positive_gt"] += 1
+    stage_counts = record.get("stage_point_counts") or {}
+    if int(stage_counts.get("intensity_filter", 0)) > 0:
+        target["gt_with_filtered_points"] += 1
+    if record.get("cluster_ids"):
+        target["gt_with_associated_cluster"] += 1
+    if record.get("car_detection_ids_before_nms"):
+        target["gt_with_car_before_nms"] += 1
+    if record.get("car_detection_ids_after_nms"):
+        target["gt_with_car_after_nms"] += 1
+    if float(record.get("best_iou_after_nms", 0.0)) >= AUXILIARY_IOU:
+        target["gt_with_associated_iou_ge_0_25"] += 1
+    if float(record.get("best_iou_after_nms", 0.0)) >= PRIMARY_IOU:
+        target["gt_with_associated_iou_ge_0_50"] += 1
+    if record.get("matched_at_primary_iou"):
+        target["gt_matched_at_iou_0_50"] += 1
+
+
+def _feature_summary(branches):
+    numeric = {
+        "num_points": [],
+        "axis_max_dim": [],
+        "axis_length": [],
+        "axis_width": [],
+        "height_span": [],
+        "range_xy_m": [],
+        "point_density_xy": [],
+    }
+    gate_counts = {
+        "associated_branch_count": 0,
+        "axis_size_pass_count": 0,
+        "point_count_pass_count": 0,
+        "both_classifier_gates_pass_count": 0,
+        "neither_classifier_gate_pass_count": 0,
+        "car_candidate_count": 0,
+    }
+    for branch in branches:
+        features = branch.get("cluster_features") or {}
+        axis_length = float(features.get("axis_length", 0.0))
+        axis_width = float(features.get("axis_width", 0.0))
+        num_points = int(features.get("num_points", 0))
+        axis_pass = max(axis_length, axis_width) >= 2.0
+        points_pass = num_points >= 500
+        gate_counts["associated_branch_count"] += 1
+        gate_counts["axis_size_pass_count"] += int(axis_pass)
+        gate_counts["point_count_pass_count"] += int(points_pass)
+        gate_counts["both_classifier_gates_pass_count"] += int(axis_pass or points_pass)
+        gate_counts["neither_classifier_gate_pass_count"] += int(not (axis_pass or points_pass))
+        gate_counts["car_candidate_count"] += int(branch.get("is_car_candidate", False))
+        numeric["num_points"].append(num_points)
+        numeric["axis_max_dim"].append(max(axis_length, axis_width))
+        for field in ("axis_length", "axis_width", "height_span", "range_xy_m", "point_density_xy"):
+            numeric[field].append(float(features.get(field, 0.0)))
+
+    distributions = {}
+    for field, values in numeric.items():
+        distributions[field] = {
+            "count": len(values),
+            "min": min(values) if values else None,
+            "max": max(values) if values else None,
+            "mean": float(sum(values) / len(values)) if values else None,
+        }
+    return {"gate_counts": gate_counts, "distributions": distributions}
+
+
+def summarize_candidate_conversion_records(records):
+    """Summarize read-only waterfall and classifier features by distance bin."""
+    grouped = {distance_bin: [] for distance_bin in DISTANCE_BINS}
+    for record in records:
+        distance_bin = record.get("distance_bin")
+        if distance_bin not in DISTANCE_BINS[:-1]:
+            raise ValueError(f"invalid distance_bin: {distance_bin}")
+        grouped[distance_bin].append(record)
+        grouped["total"].append(record)
+
+    waterfall = {}
+    classification = {}
+    terminal_states = {}
+    for distance_bin in DISTANCE_BINS:
+        counts = _empty_waterfall()
+        for record in grouped[distance_bin]:
+            _add_waterfall_record(counts, record)
+        waterfall[distance_bin] = {"counts": counts, "ratios": _ratio_counts(counts)}
+        branches = [branch for record in grouped[distance_bin] for branch in record.get("candidate_branches", [])]
+        classification[distance_bin] = _feature_summary(branches)
+        state_counts = Counter(record.get("terminal_state", "unknown") for record in grouped[distance_bin])
+        terminal_states[distance_bin] = dict(sorted(state_counts.items()))
+
+    return {
+        "distance_bins": list(DISTANCE_BINS),
+        "waterfall": waterfall,
+        "classification_audit": classification,
+        "terminal_state_counts": terminal_states,
+    }
