@@ -370,6 +370,10 @@ def build_downstream_attribution(*, gt_box, associated_after, associated_before,
 
 WATERFALL_FIELDS = (
     "num_positive_gt",
+    "tp_iou_0_50",
+    "fn_iou_0_50",
+    "tp_iou_0_25",
+    "fn_iou_0_25",
     "gt_with_filtered_points",
     "gt_with_associated_cluster",
     "gt_with_car_before_nms",
@@ -377,6 +381,7 @@ WATERFALL_FIELDS = (
     "gt_with_associated_iou_ge_0_25",
     "gt_with_associated_iou_ge_0_50",
     "gt_matched_at_iou_0_50",
+    "zero_detection_with_gt",
 )
 DISTANCE_BINS = ("near_0_15", "mid_15_30", "far_30_inf", "total")
 
@@ -396,6 +401,9 @@ def _ratio_counts(counts):
 
 def _add_waterfall_record(target, record):
     target["num_positive_gt"] += 1
+    matched = record.get("matched_by_iou") or {}
+    target["tp_iou_0_50"] += int(bool(matched.get("0.50", record.get("matched_at_primary_iou", False))))
+    target["tp_iou_0_25"] += int(bool(matched.get("0.25", False)))
     stage_counts = record.get("stage_point_counts") or {}
     if int(stage_counts.get("intensity_filter", 0)) > 0:
         target["gt_with_filtered_points"] += 1
@@ -405,12 +413,15 @@ def _add_waterfall_record(target, record):
         target["gt_with_car_before_nms"] += 1
     if record.get("car_detection_ids_after_nms"):
         target["gt_with_car_after_nms"] += 1
+    target["zero_detection_with_gt"] += int(not record.get("car_detection_ids_after_nms"))
     if float(record.get("best_iou_after_nms", 0.0)) >= AUXILIARY_IOU:
         target["gt_with_associated_iou_ge_0_25"] += 1
     if float(record.get("best_iou_after_nms", 0.0)) >= PRIMARY_IOU:
         target["gt_with_associated_iou_ge_0_50"] += 1
     if record.get("matched_at_primary_iou"):
         target["gt_matched_at_iou_0_50"] += 1
+    target["fn_iou_0_50"] = target["num_positive_gt"] - target["tp_iou_0_50"]
+    target["fn_iou_0_25"] = target["num_positive_gt"] - target["tp_iou_0_25"]
 
 
 def _feature_summary(branches):

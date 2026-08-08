@@ -1,6 +1,8 @@
 """Variant registration and GT/cluster merging gates for v15.2."""
 
 from dataclasses import dataclass
+import hashlib
+import json
 import math
 
 from bev_tracking.adaptive_clustering import cluster_points
@@ -8,7 +10,11 @@ from bev_tracking.clustering_policy import ClusteringPolicy
 from bev_tracking.clustering_detector import split_obstacle_filter_stages
 from bev_tracking.eval_policy import classify_gt_box
 from bev_tracking.failure_evidence import build_failure_evidence_report
-from bev_tracking.candidate_conversion import summarize_candidate_conversion_records
+from bev_tracking.candidate_conversion import (
+    CANDIDATE_CONVERSION_SCHEMA_VERSION,
+    CANDIDATE_CONVERSION_SOURCE_OF_TRUTH,
+    summarize_candidate_conversion_records,
+)
 from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 
 
@@ -195,12 +201,19 @@ def compare_eligible_gt_sets(reports_by_variant):
         for name, current in sets.items()
         if current != reference
     }
+    reference = sorted(sets["C0"])
+    hashes = {
+        name: hashlib.sha256(
+            json.dumps(sorted(values), separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        for name, values in sets.items()
+    }
     return {
         "passed": not mismatches,
-        "eligible_gt_by_variant": {
-            name: sorted(values)
-            for name, values in sets.items()
-        },
+        "reference_variant": "C0",
+        "eligible_gt": reference,
+        "counts_by_variant": {name: len(values) for name, values in sets.items()},
+        "hash_by_variant": hashes,
         "mismatches": mismatches,
     }
 
@@ -268,15 +281,30 @@ def validate_variant_batch_results(reports_by_variant):
 
 
 def rank_variant_summaries(summaries):
-    return sorted(
+    ordered = sorted(
         summaries,
         key=lambda item: (
             -int(item["primary_iou_0_50"]["tp"]),
             int(item["primary_iou_0_50"]["fp"]),
-            float(item["primary_iou_0_50"]["merging_rate"] or float("inf")),
+            float("inf")
+            if item["primary_iou_0_50"]["merging_rate"] is None
+            else float(item["primary_iou_0_50"]["merging_rate"]),
             str(item["variant"]),
         ),
     )
+    return [
+        {
+            "rank": rank,
+            "variant": item["variant"],
+            "selection_values": {
+                "tp_iou_0_50": int(item["primary_iou_0_50"]["tp"]),
+                "fp_iou_0_50": int(item["primary_iou_0_50"]["fp"]),
+                "merging_rate": item["primary_iou_0_50"]["merging_rate"],
+            },
+            "sort_rule": ["tp desc", "fp asc", "merging_rate asc", "variant asc"],
+        }
+        for rank, item in enumerate(ordered, start=1)
+    ]
 
 
 def aggregate_distance_analysis(reports):
@@ -299,7 +327,11 @@ def aggregate_distance_analysis(reports):
         conversion = report.get("candidate_conversion") or {}
         records = conversion.get("evidence")
         if not isinstance(records, list):
-            raise ValueError(f"missing canonical candidate conversion evidence: {report.get('frame_id')}")
+            # Legacy callers may still provide 15.2 records. New report
+            # generation never uses this fallback; it remains for replay tests.
+            records = report.get("gt_candidate_records")
+        if not isinstance(records, list):
+            raise ValueError(f"missing candidate conversion evidence: {report.get('frame_id')}")
         for record in records:
             distance_bin = record.get("distance_bin")
             if distance_bin not in bins:
@@ -356,9 +388,10 @@ def build_variant_diagnostics(reports):
         )
         conversion_records.extend(records)
     return {
+        "schema_version": CANDIDATE_CONVERSION_SCHEMA_VERSION,
+        "source_of_truth": CANDIDATE_CONVERSION_SOURCE_OF_TRUTH,
         "frames": frames,
         "candidate_conversion_evidence": conversion_records,
-        "distance_analysis": aggregate_distance_analysis(reports),
         "candidate_conversion_analysis": summarize_candidate_conversion_records(conversion_records)
         if conversion_records
         else None,

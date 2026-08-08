@@ -37,13 +37,14 @@ class CandidateConversionSchemaDay2Test(unittest.TestCase):
         output = build_variant_diagnostics([report])
         self.assertNotIn("gt_records", output)
         self.assertEqual(output["candidate_conversion_evidence"], [evidence()])
-        self.assertEqual(output["distance_analysis"]["near_0_15"]["gt_count"], 1)
-        self.assertNotIn("unknown", output["distance_analysis"]["near_0_15"]["terminal_state_counts"])
+        waterfall = output["candidate_conversion_analysis"]["waterfall"]
+        self.assertEqual(waterfall["near_0_15"]["counts"]["num_positive_gt"], 1)
+        self.assertNotIn("unknown", output["candidate_conversion_analysis"]["terminal_state_counts"]["near_0_15"])
         self.assertEqual(
-            output["distance_analysis"]["near_0_15"]["terminal_state_counts"],
+            output["candidate_conversion_analysis"]["terminal_state_counts"]["near_0_15"],
             {"matched_at_0_50": 1},
         )
-        self.assertEqual(output["candidate_conversion_analysis"]["waterfall"]["total"]["counts"]["gt_matched_at_iou_0_50"], 1)
+        self.assertEqual(waterfall["total"]["counts"]["gt_matched_at_iou_0_50"], 1)
 
     def test_missing_canonical_evidence_is_rejected(self):
         with self.assertRaises(ValueError):

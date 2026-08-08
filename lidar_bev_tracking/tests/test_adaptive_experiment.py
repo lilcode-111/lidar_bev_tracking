@@ -86,7 +86,8 @@ class AdaptiveExperimentTest(unittest.TestCase):
         result = compare_eligible_gt_sets(reports)
         self.assertFalse(result["passed"])
         self.assertIn("C2", result["mismatches"])
-        self.assertIsInstance(result["eligible_gt_by_variant"]["C0"], list)
+        self.assertIsInstance(result["eligible_gt"], list)
+        self.assertEqual(result["counts_by_variant"]["C0"], 1)
 
     def test_variant_aggregation_keeps_primary_and_auxiliary_metrics(self):
         report = {
@@ -118,6 +119,7 @@ class AdaptiveExperimentTest(unittest.TestCase):
             ]
         )
         self.assertEqual([item["variant"] for item in ranked], ["C0", "C1"])
+        self.assertEqual([item["rank"] for item in ranked], [1, 2])
 
 
 if __name__ == "__main__":
