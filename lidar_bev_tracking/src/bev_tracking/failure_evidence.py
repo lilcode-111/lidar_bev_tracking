@@ -131,6 +131,7 @@ def build_failure_evidence_report(
             evaluation=evaluation,
             variant=candidate_variant,
             min_points=min_points,
+            clustering_policy=clustering_policy,
             source_run_id=source_run_id,
         )
 

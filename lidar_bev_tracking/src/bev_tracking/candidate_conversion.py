@@ -77,6 +77,15 @@ def validate_min_points(min_points):
     return int(min_points)
 
 
+def effective_min_points_for_gt(gt_box, min_points, clustering_policy=None):
+    """Resolve the audit threshold from the GT's own distance bin."""
+    fallback = validate_min_points(min_points)
+    if clustering_policy is None:
+        return fallback
+    range_xy = float(np.hypot(float(gt_box["x"]), float(gt_box["y"])))
+    return validate_min_points(clustering_policy.params_for_range(range_xy)["min_points"])
+
+
 def gt_cluster_association_indices(filtered_points, gt_box, clusters):
     """Return all associated cluster indices using the frozen v15.2 gate."""
     gt_point_count = int(points_in_oriented_3d_box(filtered_points, gt_box).sum())
@@ -131,10 +140,11 @@ def build_candidate_conversion_evidence(
     evaluation,
     variant,
     min_points,
+    clustering_policy=None,
     source_run_id=None,
 ):
     """Build one GT's complete C0/C1 candidate-conversion lineage."""
-    validate_min_points(min_points)
+    min_points = effective_min_points_for_gt(gt_box, min_points, clustering_policy)
     filtered_points = stages["intensity_filter"]
     filtered_count, associated_indices = gt_cluster_association_indices(filtered_points, gt_box, clusters)
     associated_raw = [raw_detections[index] for index in associated_indices]
@@ -222,6 +232,7 @@ def build_candidate_conversion_report(
     evaluation,
     variant,
     min_points,
+    clustering_policy=None,
     source_run_id=None,
 ):
     """Build evidence for every positive GT and summarize terminal states."""
@@ -237,6 +248,7 @@ def build_candidate_conversion_report(
             evaluation=evaluation,
             variant=variant,
             min_points=min_points,
+            clustering_policy=clustering_policy,
             source_run_id=source_run_id,
         )
         for gt_box in positive_gt
