@@ -14,6 +14,7 @@ from bev_tracking.adaptive_experiment import (
     variant_specs_from_config,
 )
 from bev_tracking.candidate_conversion import build_candidate_conversion_delta
+from bev_tracking.review_supplement import build_review_supplement_day2
 from bev_tracking.failure_evidence_batch import load_diagnostic_manifest
 from bev_tracking.kitti import (
     load_kitti_labels,
@@ -91,6 +92,7 @@ def main():
             for name, reports in reports_by_variant.items()
         },
         "delta_cohort": build_candidate_conversion_delta(reports_by_variant),
+        "review_supplement": build_review_supplement_day2(reports_by_variant),
     }
     output_path = Path(args.output)
     atomic_write_json(output_path, output)
