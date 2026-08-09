@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from bev_tracking.adaptive_experiment import VariantSpec, run_variant_frame
 from bev_tracking.candidate_conversion import (
     build_candidate_conversion_report,
     effective_min_points_for_gt,
@@ -71,6 +72,42 @@ class CandidateConversionDay2Test(unittest.TestCase):
             clustering_policy=self.adaptive_policy(),
         )
         self.assertEqual(result["evidence"][0]["terminal_state"], "no_associated_cluster")
+
+    def test_run_variant_frame_uses_gt_distance_policy_at_boundaries(self):
+        variant = VariantSpec("C1", self.adaptive_policy())
+        cases = (
+            (14.999, 12, "insufficient_filtered_points_for_association"),
+            (15.0, 12, "no_associated_cluster"),
+            (29.999, 7, "insufficient_filtered_points_for_association"),
+            (30.0, 7, "no_associated_cluster"),
+        )
+        for index, (range_xy, count, expected) in enumerate(cases):
+            with self.subTest(range_xy=range_xy):
+                gt_box = {**car_box(), "x": range_xy}
+                offsets = np.asarray(
+                    [
+                        (-1.5, -0.7), (-0.75, -0.7), (0.0, -0.7), (0.75, -0.7),
+                        (1.5, -0.7), (-1.5, 0.0), (-0.75, 0.0), (0.0, 0.0),
+                        (0.75, 0.0), (1.5, 0.0), (-1.5, 0.7), (-0.75, 0.7),
+                    ][:count],
+                    dtype=np.float32,
+                )
+                frame_points = np.column_stack(
+                    [
+                        offsets[:, 0] + range_xy,
+                        offsets[:, 1],
+                        np.zeros(count, dtype=np.float32),
+                        np.ones(count, dtype=np.float32),
+                    ]
+                ).astype(np.float32)
+                report = run_variant_frame(
+                    frame_points,
+                    [gt_box],
+                    frame_id=str(index + 1),
+                    variant=variant,
+                )
+                evidence = report["candidate_conversion"]["evidence"][0]
+                self.assertEqual(evidence["terminal_state"], expected)
 
     def test_report_preserves_all_associated_branches(self):
         cluster_a = points(15)
