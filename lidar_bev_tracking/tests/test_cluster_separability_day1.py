@@ -55,9 +55,9 @@ class ClusterSeparabilityDay1Test(unittest.TestCase):
     def test_frame_groups_partition_clusters_into_p1_p2_and_n(self):
         clusters = [cluster(10.0), cluster(20.0), cluster(35.0)]
         detections = [
-            {"id": "cluster_1", "class_name": "car", "x": 10.0, "y": 0.0},
-            {"id": "cluster_2", "class_name": "pedestrian", "x": 20.0, "y": 0.0},
-            {"id": "cluster_3", "class_name": "cone", "x": 35.0, "y": 0.0},
+            {"id": "cluster_1", "class_name": "car", "x": 10.0, "y": 0.0, "length": 3.0, "width": 1.5, "yaw": 0.0},
+            {"id": "cluster_2", "class_name": "pedestrian", "x": 20.0, "y": 0.0, "length": 1.0, "width": 0.6, "yaw": 0.0},
+            {"id": "cluster_3", "class_name": "cone", "x": 35.0, "y": 0.0, "length": 0.5, "width": 0.3, "yaw": 0.0},
         ]
         payload = build_frame_cluster_groups(
             frame_id="1",

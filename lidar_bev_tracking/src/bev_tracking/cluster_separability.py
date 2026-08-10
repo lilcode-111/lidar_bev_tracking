@@ -7,11 +7,28 @@ import numpy as np
 from bev_tracking.candidate_conversion import gt_cluster_association_indices
 from bev_tracking.clustering_policy import distance_bin_name
 from bev_tracking.eval_policy import classify_gt_box, is_positive_detection
+from bev_tracking.geometry import bev_iou
 from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 
 
 CLUSTER_GROUP_SCHEMA_VERSION = "15.3.1-cluster-groups-day1"
+CLUSTER_FEATURE_SCHEMA_VERSION = "15.3.1-cluster-features-day2"
 CLUSTER_GROUPS = ("P1", "P2", "N")
+
+
+def _cluster_features(cluster, detection):
+    axis_length = float(max(cluster[:, 0].max() - cluster[:, 0].min(), 0.1))
+    axis_width = float(max(cluster[:, 1].max() - cluster[:, 1].min(), 0.1))
+    height_span = float(max(cluster[:, 2].max() - cluster[:, 2].min(), 0.0))
+    return {
+        "num_points": int(len(cluster)),
+        "axis_length": axis_length,
+        "axis_width": axis_width,
+        "height_span": height_span,
+        "point_density_xy": float(len(cluster) / max(axis_length * axis_width, 1e-6)),
+        "pca_length": float(detection.get("length", 0.0)),
+        "pca_width": float(detection.get("width", 0.0)),
+    }
 
 
 def build_frame_cluster_groups(
@@ -22,6 +39,7 @@ def build_frame_cluster_groups(
         raise ValueError("clusters and raw_detections must have the same length")
     frame_id = str(frame_id).zfill(6)
     positive_gt = [box for box in gt_boxes if classify_gt_box(box) == "positive"]
+    positive_gt_by_id = {str(box["id"]): box for box in positive_gt}
     associations = {index: [] for index in range(len(clusters))}
     for gt_box in positive_gt:
         gt_point_count, cluster_indices = gt_cluster_association_indices(
@@ -43,7 +61,19 @@ def build_frame_cluster_groups(
     records = []
     for index, (cluster, detection) in enumerate(zip(clusters, raw_detections)):
         cluster_id = str(detection.get("id", f"cluster_{index + 1}"))
-        linked = sorted(associations[index], key=lambda item: item["gt_id"])
+        linked = []
+        for source in associations[index]:
+            item = dict(source)
+            overlap = int(item["cluster_points_in_gt"])
+            item["gt_coverage_ratio"] = float(
+                overlap / item["gt_filtered_point_count"]
+            ) if item["gt_filtered_point_count"] else None
+            item["cluster_purity_ratio"] = float(overlap / len(cluster)) if len(cluster) else None
+            item["pca_box_iou"] = float(
+                bev_iou(positive_gt_by_id[item["gt_id"]], detection)
+            )
+            linked.append(item)
+        linked = sorted(linked, key=lambda item: item["gt_id"])
         if linked:
             group = "P1" if is_positive_detection(detection) else "P2"
         else:
@@ -56,6 +86,20 @@ def build_frame_cluster_groups(
                 classify_gt_box(gt_box)
                 for gt_box in gt_boxes
                 if points_in_oriented_3d_box(cluster, gt_box).any()
+            }
+        )
+        target = sorted(
+            linked,
+            key=lambda item: (-int(item["cluster_points_in_gt"]), item["gt_id"]),
+        )[0] if linked else None
+        features = _cluster_features(cluster, detection)
+        features.update(
+            {
+                "target_gt_id": target["gt_id"] if target else None,
+                "gt_coverage_ratio": target["gt_coverage_ratio"] if target else None,
+                "cluster_purity_ratio": target["cluster_purity_ratio"] if target else None,
+                "pca_iou_to_target_gt": target["pca_box_iou"] if target else None,
+                "oracle_car_iou": target["pca_box_iou"] if group == "P2" else None,
             }
         )
         records.append(
@@ -72,6 +116,8 @@ def build_frame_cluster_groups(
                 "is_strict_background": bool(group == "N" and not overlap_categories),
                 "is_delta_22": False,
                 "delta_22_gt_ids": [],
+                "feature_schema_version": CLUSTER_FEATURE_SCHEMA_VERSION,
+                "features": features,
             }
         )
 
@@ -106,6 +152,35 @@ def validate_cluster_group_partition(records, expected_cluster_count):
         associated = bool(record.get("associated_gt_ids"))
         if (record["group"] in {"P1", "P2"}) != associated:
             raise ValueError("P1/P2 must be GT-associated and N must be unassociated")
+    return True
+
+
+def validate_cluster_feature_records(records):
+    numeric_fields = (
+        "num_points", "axis_length", "axis_width", "height_span",
+        "point_density_xy", "pca_length", "pca_width",
+    )
+    for record in records:
+        if record.get("feature_schema_version") != CLUSTER_FEATURE_SCHEMA_VERSION:
+            raise ValueError("missing Day 2 cluster feature schema")
+        features = record.get("features") or {}
+        for field in numeric_fields:
+            value = features.get(field)
+            if value is None or not np.isfinite(float(value)) or float(value) < 0:
+                raise ValueError(f"invalid cluster feature: {field}")
+        associated = record.get("group") in {"P1", "P2"}
+        for field in ("gt_coverage_ratio", "cluster_purity_ratio"):
+            value = features.get(field)
+            if associated and (value is None or not 0.0 <= float(value) <= 1.0):
+                raise ValueError(f"invalid associated-cluster ratio: {field}")
+            if not associated and value is not None:
+                raise ValueError(f"N must not define {field}")
+        oracle = features.get("oracle_car_iou")
+        if record.get("group") == "P2":
+            if oracle is None or not 0.0 <= float(oracle) <= 1.0:
+                raise ValueError("P2 must define a valid read-only oracle IoU")
+        elif oracle is not None:
+            raise ValueError("only P2 may define oracle_car_iou")
     return True
 
 
@@ -181,3 +256,41 @@ def build_cluster_group_day1(reports_by_variant, base_variant="C0", candidate_va
         ],
         "records_by_variant": records_by_variant,
     }
+
+
+def _oracle_summary(records):
+    values = [float(item["features"]["oracle_car_iou"]) for item in records]
+    return {
+        "count": int(len(values)),
+        "iou_ge_0_25_count": int(sum(value >= 0.25 for value in values)),
+        "iou_ge_0_50_count": int(sum(value >= 0.50 for value in values)),
+        "mean": float(sum(values) / len(values)) if values else None,
+        "max": max(values) if values else None,
+    }
+
+
+def build_cluster_feature_day2(grouped):
+    """Consume one Day 1 result; validate features and summarize P2 oracle IoU."""
+    if not isinstance(grouped, dict) or grouped.get("schema_version") != CLUSTER_GROUP_SCHEMA_VERSION:
+        raise ValueError("Day 2 requires a valid Day 1 cluster-group result")
+    for records in grouped["records_by_variant"].values():
+        validate_cluster_feature_records(records)
+    candidate_variant = grouped["candidate_variant"]
+    candidate_records = grouped["records_by_variant"][candidate_variant]
+    p2 = [item for item in candidate_records if item["group"] == "P2"]
+    delta_p2 = [item for item in p2 if item["is_delta_22"]]
+    result = dict(grouped)
+    result.update(
+        {
+            "schema_version": CLUSTER_FEATURE_SCHEMA_VERSION,
+            "source_group_schema_version": CLUSTER_GROUP_SCHEMA_VERSION,
+            "feature_definitions": {
+                "gt_coverage_ratio": "cluster points inside target GT / filtered points inside target GT",
+                "cluster_purity_ratio": "cluster points inside target GT / cluster points",
+                "oracle_car_iou": "P2 original PCA box versus target GT; no pipeline mutation",
+            },
+            "candidate_p2_oracle": _oracle_summary(p2),
+            "delta_22_p2_oracle": _oracle_summary(delta_p2),
+        }
+    )
+    return result
