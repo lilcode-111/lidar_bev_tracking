@@ -5,7 +5,7 @@ from collections import Counter
 import numpy as np
 
 from bev_tracking.candidate_conversion import gt_cluster_association_indices
-from bev_tracking.clustering_policy import distance_bin_name
+from bev_tracking.clustering_policy import DISTANCE_BIN_NAMES, distance_bin_name
 from bev_tracking.eval_policy import classify_gt_box, is_positive_detection
 from bev_tracking.geometry import bev_iou
 from bev_tracking.geometry_sanity import points_in_oriented_3d_box
@@ -13,7 +13,20 @@ from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 
 CLUSTER_GROUP_SCHEMA_VERSION = "15.3.1-cluster-groups-day1"
 CLUSTER_FEATURE_SCHEMA_VERSION = "15.3.1-cluster-features-day2"
+CLUSTER_DIAGNOSTIC_SCHEMA_VERSION = "15.3.1-cluster-separability-day3"
 CLUSTER_GROUPS = ("P1", "P2", "N")
+COMPARISON_FEATURES = (
+    "num_points",
+    "axis_length",
+    "axis_width",
+    "height_span",
+    "point_density_xy",
+    "pca_length",
+    "pca_width",
+    "gt_coverage_ratio",
+    "cluster_purity_ratio",
+    "pca_iou_to_target_gt",
+)
 
 
 def _cluster_features(cluster, detection):
@@ -279,18 +292,143 @@ def build_cluster_feature_day2(grouped):
     candidate_records = grouped["records_by_variant"][candidate_variant]
     p2 = [item for item in candidate_records if item["group"] == "P2"]
     delta_p2 = [item for item in p2 if item["is_delta_22"]]
-    result = dict(grouped)
-    result.update(
-        {
-            "schema_version": CLUSTER_FEATURE_SCHEMA_VERSION,
-            "source_group_schema_version": CLUSTER_GROUP_SCHEMA_VERSION,
-            "feature_definitions": {
-                "gt_coverage_ratio": "cluster points inside target GT / filtered points inside target GT",
-                "cluster_purity_ratio": "cluster points inside target GT / cluster points",
-                "oracle_car_iou": "P2 original PCA box versus target GT; no pipeline mutation",
-            },
-            "candidate_p2_oracle": _oracle_summary(p2),
-            "delta_22_p2_oracle": _oracle_summary(delta_p2),
+    return {
+        "schema_version": CLUSTER_FEATURE_SCHEMA_VERSION,
+        "source_group_schema_version": CLUSTER_GROUP_SCHEMA_VERSION,
+        "base_variant": grouped["base_variant"],
+        "candidate_variant": candidate_variant,
+        "group_counts_by_variant": grouped["group_counts_by_variant"],
+        "delta_associated_gt_count": grouped["delta_associated_gt_count"],
+        "delta_p2_gt_count": grouped["delta_p2_gt_count"],
+        "delta_p2_cluster_count": grouped["delta_p2_cluster_count"],
+        "delta_gt_without_p2_cluster": grouped["delta_gt_without_p2_cluster"],
+        "feature_definitions": {
+            "gt_coverage_ratio": "cluster points inside target GT / filtered points inside target GT",
+            "cluster_purity_ratio": "cluster points inside target GT / cluster points",
+            "oracle_car_iou": "P2 original PCA box versus target GT; no pipeline mutation",
+        },
+        "candidate_p2_oracle": _oracle_summary(p2),
+        "delta_22_p2_oracle": _oracle_summary(delta_p2),
+    }
+
+
+def _distribution(values):
+    numeric = np.asarray(values, dtype=np.float64)
+    if not len(numeric):
+        return {
+            "count": 0, "min": None, "p25": None, "median": None,
+            "mean": None, "p75": None, "max": None,
         }
-    )
-    return result
+    p25, median, p75 = np.percentile(numeric, [25, 50, 75])
+    return {
+        "count": int(len(numeric)),
+        "min": float(numeric.min()),
+        "p25": float(p25),
+        "median": float(median),
+        "mean": float(numeric.mean()),
+        "p75": float(p75),
+        "max": float(numeric.max()),
+    }
+
+
+def _feature_distributions(records):
+    outputs = {}
+    for distance_bin in (*DISTANCE_BIN_NAMES, "total"):
+        selected = records if distance_bin == "total" else [
+            item for item in records if item["cluster_distance_bin"] == distance_bin
+        ]
+        outputs[distance_bin] = {
+            "cluster_count": int(len(selected)),
+            "features": {
+                field: _distribution(
+                    [item["features"][field] for item in selected if item["features"].get(field) is not None]
+                )
+                for field in COMPARISON_FEATURES
+            },
+        }
+    return outputs
+
+
+def build_cluster_separability_day3(grouped, featured):
+    """Build the compact final comparison without recomputing Day 1 or Day 2."""
+    if not isinstance(grouped, dict) or grouped.get("schema_version") != CLUSTER_GROUP_SCHEMA_VERSION:
+        raise ValueError("Day 3 requires a valid Day 1 cluster-group result")
+    if not isinstance(featured, dict) or featured.get("schema_version") != CLUSTER_FEATURE_SCHEMA_VERSION:
+        raise ValueError("Day 3 requires a valid Day 2 feature result")
+    candidate_variant = grouped["candidate_variant"]
+    if featured.get("candidate_variant") != candidate_variant:
+        raise ValueError("Day 1 and Day 2 candidate variants differ")
+    records = grouped["records_by_variant"][candidate_variant]
+    validate_cluster_feature_records(records)
+
+    p1 = [item for item in records if item["group"] == "P1"]
+    p2 = [item for item in records if item["group"] == "P2"]
+    delta_p2 = [item for item in p2 if item["is_delta_22"]]
+    associated_context = {
+        (item["frame_id"], item["cluster_distance_bin"]) for item in (*p1, *p2)
+    }
+    delta_context = {
+        (item["frame_id"], item["cluster_distance_bin"]) for item in delta_p2
+    }
+    strict_n = [
+        item for item in records
+        if item["group"] == "N"
+        and item["is_strict_background"]
+        and (item["frame_id"], item["cluster_distance_bin"]) in associated_context
+    ]
+    delta_strict_n = [
+        item for item in strict_n
+        if (item["frame_id"], item["cluster_distance_bin"]) in delta_context
+    ]
+
+    delta_records = [
+        {
+            "frame_id": item["frame_id"],
+            "cluster_id": item["cluster_id"],
+            "delta_22_gt_ids": list(item["delta_22_gt_ids"]),
+            "cluster_distance_bin": item["cluster_distance_bin"],
+            "features": dict(item["features"]),
+        }
+        for item in delta_p2
+    ]
+    return {
+        "schema_version": CLUSTER_DIAGNOSTIC_SCHEMA_VERSION,
+        "source_group_schema_version": CLUSTER_GROUP_SCHEMA_VERSION,
+        "source_feature_schema_version": CLUSTER_FEATURE_SCHEMA_VERSION,
+        "candidate_variant": candidate_variant,
+        "selection": {
+            "P1": "all candidate-variant P1 clusters",
+            "P2": "all candidate-variant P2 clusters",
+            "N": "unique strict-background N clusters in the same frame and distance bin as P1/P2",
+            "delta_22_N": "unique strict-background N clusters in the same frame and distance bin as delta-22 P2",
+        },
+        "set_counts": {
+            "P1": int(len(p1)),
+            "P2": int(len(p2)),
+            "N": int(len(strict_n)),
+            "delta_22_P2": int(len(delta_p2)),
+            "delta_22_N": int(len(delta_strict_n)),
+        },
+        "all_candidate_context": {
+            "P1": _feature_distributions(p1),
+            "P2": _feature_distributions(p2),
+            "N": _feature_distributions(strict_n),
+        },
+        "delta_22_context": {
+            "P2": _feature_distributions(delta_p2),
+            "N": _feature_distributions(delta_strict_n),
+        },
+        "oracle": {
+            "all_P2": dict(featured["candidate_p2_oracle"]),
+            "delta_22_P2": dict(featured["delta_22_p2_oracle"]),
+        },
+        "delta_22_records": delta_records,
+        "decision_question": (
+            "Are the delta-22 P2 clusters detection-worthy classifier false rejects, "
+            "or incomplete vehicle fragments?"
+        ),
+        "frozen_pipeline": [
+            "clustering", "2.0m_classifier_gate", "500_point_classifier_gate",
+            "nms", "evaluation",
+        ],
+    }

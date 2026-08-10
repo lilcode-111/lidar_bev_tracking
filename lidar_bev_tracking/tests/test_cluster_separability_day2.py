@@ -54,7 +54,8 @@ class ClusterSeparabilityDay2Test(unittest.TestCase):
         self.assertEqual(result["delta_22_p2_oracle"]["count"], 1)
         self.assertEqual(result["delta_22_p2_oracle"]["iou_ge_0_25_count"], 1)
         self.assertEqual(result["delta_22_p2_oracle"]["iou_ge_0_50_count"], 1)
-        self.assertTrue(result["records_by_variant"]["C1"][0]["is_delta_22"])
+        self.assertTrue(grouped["records_by_variant"]["C1"][0]["is_delta_22"])
+        self.assertNotIn("records_by_variant", result)
 
     def test_day2_rejects_raw_reports_instead_of_recomputing_day1(self):
         with self.assertRaisesRegex(ValueError, "requires a valid Day 1"):
