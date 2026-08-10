@@ -118,8 +118,10 @@ def build_failure_evidence_report(
         "effective_car_detection_count": int(primary_metrics["effective_car_detection_count"]),
     }
     candidate_conversion = None
+    cluster_separability = None
     if candidate_variant is not None:
         from bev_tracking.candidate_conversion import build_candidate_conversion_report
+        from bev_tracking.cluster_separability import build_frame_cluster_groups
 
         candidate_conversion = build_candidate_conversion_report(
             frame_id=frame_id,
@@ -133,6 +135,14 @@ def build_failure_evidence_report(
             min_points=min_points,
             clustering_policy=clustering_policy,
             source_run_id=source_run_id,
+        )
+        cluster_separability = build_frame_cluster_groups(
+            frame_id=frame_id,
+            variant=candidate_variant,
+            filtered_points=stages["intensity_filter"],
+            clusters=clusters,
+            raw_detections=raw_detections,
+            gt_boxes=gt_boxes,
         )
 
     return {
@@ -167,6 +177,7 @@ def build_failure_evidence_report(
         "gt_candidate_records": gt_candidate_records,
         "failure_evidence": [item.to_dict() for item in evidence],
         "candidate_conversion": candidate_conversion,
+        "cluster_separability": cluster_separability,
     }
 
 
