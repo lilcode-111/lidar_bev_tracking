@@ -20,7 +20,7 @@ from bev_tracking.cluster_separability import (
     build_cluster_separability_day3,
 )
 from bev_tracking.review_supplement import build_review_supplement_day2
-from bev_tracking.point_retention import build_point_retention_day1
+from bev_tracking.point_retention import build_point_retention_day1, build_point_retention_day2
 from bev_tracking.failure_evidence_batch import load_diagnostic_manifest
 from bev_tracking.kitti import (
     load_kitti_labels,
@@ -89,6 +89,7 @@ def main():
         cluster_separability_day1, cluster_separability_day2
     )
     point_retention_day1 = build_point_retention_day1(reports_by_variant)
+    point_retention_day2 = build_point_retention_day2(point_retention_day1, reports_by_variant)
     output = {
         "schema_version": "15.2-ablation",
         "source": {
@@ -106,6 +107,7 @@ def main():
         "delta_cohort": build_candidate_conversion_delta(reports_by_variant),
         "cluster_separability_diagnostic": cluster_separability_diagnostic,
         "point_retention_day1": point_retention_day1,
+        "point_retention_day2": point_retention_day2,
         "review_supplement": build_review_supplement_day2(reports_by_variant),
     }
     output_path = Path(args.output)

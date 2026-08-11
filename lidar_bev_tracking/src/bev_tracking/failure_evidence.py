@@ -119,9 +119,11 @@ def build_failure_evidence_report(
     }
     candidate_conversion = None
     cluster_separability = None
+    fragment_recoverability = None
     if candidate_variant is not None:
         from bev_tracking.candidate_conversion import build_candidate_conversion_report
         from bev_tracking.cluster_separability import build_frame_cluster_groups
+        from bev_tracking.point_retention import build_frame_fragment_oracles
 
         candidate_conversion = build_candidate_conversion_report(
             frame_id=frame_id,
@@ -143,6 +145,14 @@ def build_failure_evidence_report(
             clusters=clusters,
             raw_detections=raw_detections,
             gt_boxes=gt_boxes,
+        )
+        fragment_recoverability = build_frame_fragment_oracles(
+            frame_id=frame_id,
+            variant=candidate_variant,
+            gt_boxes=gt_boxes,
+            clusters=clusters,
+            raw_detections=raw_detections,
+            candidate_conversion=candidate_conversion,
         )
 
     return {
@@ -178,6 +188,7 @@ def build_failure_evidence_report(
         "failure_evidence": [item.to_dict() for item in evidence],
         "candidate_conversion": candidate_conversion,
         "cluster_separability": cluster_separability,
+        "fragment_recoverability": fragment_recoverability,
     }
 
 
