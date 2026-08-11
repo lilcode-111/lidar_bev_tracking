@@ -1,0 +1,26 @@
+{
+  "schema_version": "15.3.1-closure",
+  "status": "closed",
+  "experiment": "Car Cluster Separability Diagnostic",
+  "manifest": {
+    "path": "configs/kitti_diagnostic_frames.txt",
+    "frame_count": 25
+  },
+  "source_report": "outputs/clustering_diagnostic/v15_3_1_cluster_separability_25f.json",
+  "candidate_variant": "C1",
+  "gates": {
+    "eligible_gt_gate_passed": true,
+    "delta_associated_gt_count": 22,
+    "delta_p2_cluster_count": 22
+  },
+  "oracle": {
+    "count": 22,
+    "iou_ge_0_25_count": 0,
+    "iou_ge_0_50_count": 0,
+    "mean": 0.03348227559823222,
+    "median": 0.02047825780999854,
+    "max": 0.11004332577922803
+  },
+  "conclusion": "The delta-22 are clean but geometrically incomplete vehicle fragments; classifier relaxation is not justified.",
+  "next_phase": "15.3.2 Car Point Retention & Fragment Recoverability Diagnostic"
+}
