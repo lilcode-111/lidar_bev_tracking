@@ -9,6 +9,7 @@ from bev_tracking.oriented_box import estimate_oriented_box_xy
 
 POINT_RETENTION_SCHEMA_VERSION = "15.3.2-point-retention-day1"
 FRAGMENT_ORACLE_SCHEMA_VERSION = "15.3.2-fragment-oracles-day2"
+STAGE_ORACLE_SCHEMA_VERSION = "15.3.2-stage-oracles-day3"
 STAGE_ORDER = ("raw", "roi", "z_filter", "intensity_filter")
 PCA_STATUS_VALUES = ("valid", "insufficient_points", "degenerate_geometry")
 PCA_MIN_POINTS = 3
@@ -167,6 +168,79 @@ def build_frame_fragment_oracles(
     }
 
 
+def build_frame_stage_oracles(*, frame_id, variant, stages, gt_boxes, candidate_conversion):
+    """Build O3-O6 once from stage coordinates and gate counts against canonical evidence."""
+    missing_stages = [stage for stage in STAGE_ORDER if stage not in stages]
+    if missing_stages:
+        raise ValueError(f"missing frozen pipeline stages: {missing_stages}")
+    frame_id = str(frame_id).zfill(6)
+    gt_by_id = {
+        str(box["id"]): box for box in gt_boxes if classify_gt_box(box) == "positive"
+    }
+    evidence = candidate_conversion.get("evidence") if isinstance(candidate_conversion, dict) else None
+    if not isinstance(evidence, list):
+        raise ValueError("stage oracles require canonical candidate conversion evidence")
+    evidence_by_gt = {str(item["gt_id"]): item for item in evidence}
+    if set(evidence_by_gt) != set(gt_by_id):
+        raise ValueError("stage oracle GT set differs from canonical candidate evidence")
+
+    stage_to_oracle = {
+        "intensity_filter": "O3",
+        "z_filter": "O4",
+        "roi": "O5",
+        "raw": "O6",
+    }
+    records = []
+    for gt_id, canonical in evidence_by_gt.items():
+        gt_box = gt_by_id[gt_id]
+        canonical_counts = canonical.get("stage_point_counts")
+        if not isinstance(canonical_counts, dict):
+            raise ValueError(f"missing canonical stage counts: {frame_id} {gt_id}")
+        validate_stage_point_counts(canonical_counts)
+        oracles = {}
+        for stage in STAGE_ORDER:
+            stage_points = stages[stage]
+            selected = stage_points[points_in_oriented_3d_box(stage_points, gt_box)]
+            expected_count = int(canonical_counts[stage])
+            if len(selected) != expected_count:
+                raise ValueError(
+                    f"stage point count differs from canonical evidence: "
+                    f"{frame_id} {gt_id} {stage} {len(selected)} != {expected_count}"
+                )
+            oracle = build_pca_oracle(selected, gt_box)
+            oracle["source_stage"] = stage
+            oracle["canonical_count_match"] = True
+            oracles[stage_to_oracle[stage]] = oracle
+        records.append(
+            {
+                "frame_id": frame_id,
+                "gt_id": gt_id,
+                "variant": str(variant),
+                "distance_bin": canonical.get("distance_bin"),
+                **oracles,
+                "signed_deltas": {
+                    "O4_minus_O3": _signed_oracle_delta(oracles["O4"], oracles["O3"]),
+                    "O5_minus_O4": _signed_oracle_delta(oracles["O5"], oracles["O4"]),
+                    "O6_minus_O5": _signed_oracle_delta(oracles["O6"], oracles["O5"]),
+                },
+            }
+        )
+    return {
+        "schema_version": STAGE_ORACLE_SCHEMA_VERSION,
+        "frame_id": frame_id,
+        "variant": str(variant),
+        "canonical_count_gate_passed": True,
+        "num_positive_gt": int(len(records)),
+        "records": records,
+    }
+
+
+def _signed_oracle_delta(later_source, earlier_source):
+    if later_source.get("iou") is None or earlier_source.get("iou") is None:
+        return None
+    return float(later_source["iou"] - earlier_source["iou"])
+
+
 def build_point_retention_day1(reports_by_variant, base_variant="C0", candidate_variant="C1"):
     """Freeze delta-22 and P1-control keys against canonical 15.3.1 evidence."""
     if base_variant not in reports_by_variant or candidate_variant not in reports_by_variant:
@@ -304,4 +378,93 @@ def build_point_retention_day2(day1, reports_by_variant):
         "p1_control_gt_count": int(len(control_keys)),
         "delta_records": [indexed[key] for key in delta_keys],
         "p1_control_records": [indexed[key] for key in control_keys],
+    }
+
+
+def build_point_retention_day3(day1, day2, reports_by_variant):
+    """Join O1/O2 with O3-O6 once and preserve every signed ladder change."""
+    if not isinstance(day1, dict) or day1.get("schema_version") != POINT_RETENTION_SCHEMA_VERSION:
+        raise ValueError("Day 3 requires a valid point-retention Day 1 result")
+    if not isinstance(day2, dict) or day2.get("schema_version") != FRAGMENT_ORACLE_SCHEMA_VERSION:
+        raise ValueError("Day 3 requires a valid fragment-oracle Day 2 result")
+    candidate_variant = day1["candidate_variant"]
+    if day2.get("candidate_variant") != candidate_variant:
+        raise ValueError("Day 1 and Day 2 candidate variants differ")
+    indexed_stage = {}
+    for report in reports_by_variant.get(candidate_variant, []):
+        payload = report.get("stage_recoverability") or {}
+        if payload.get("schema_version") != STAGE_ORACLE_SCHEMA_VERSION:
+            raise ValueError(f"missing stage oracle evidence: {report.get('frame_id')}")
+        if not payload.get("canonical_count_gate_passed"):
+            raise ValueError(f"stage oracle count gate failed: {report.get('frame_id')}")
+        for item in payload.get("records", []):
+            key = (str(item["frame_id"]).zfill(6), str(item["gt_id"]))
+            if key in indexed_stage:
+                raise ValueError(f"duplicate stage oracle evidence: {key}")
+            indexed_stage[key] = item
+
+    def index_selected(records):
+        return {
+            (str(item["frame_id"]).zfill(6), str(item["gt_id"])): item
+            for item in records
+        }
+
+    day1_delta = index_selected(day1["delta_records"])
+    day1_control = index_selected(day1["p1_control_records"])
+    day2_delta = index_selected(day2["delta_records"])
+    day2_control = index_selected(day2["p1_control_records"])
+    if set(day1_delta) != set(day2_delta) or set(day1_control) != set(day2_control):
+        raise ValueError("Day 1 and Day 2 selected GT sets differ")
+
+    def join(keys, stage_counts, fragments):
+        outputs = []
+        for key in sorted(keys):
+            if key not in indexed_stage:
+                raise ValueError(f"missing selected stage oracle evidence: {key}")
+            canonical = stage_counts[key]
+            fragment = fragments[key]
+            stage = indexed_stage[key]
+            counts = canonical["stage_point_counts"]
+            for oracle_name, count_name in (("O3", "intensity_filter"), ("O4", "z_filter"), ("O5", "roi"), ("O6", "raw")):
+                if int(stage[oracle_name]["num_points"]) != int(counts[count_name]):
+                    raise ValueError(f"joined oracle count differs from Day 1: {key} {oracle_name}")
+            outputs.append(
+                {
+                    "frame_id": key[0],
+                    "gt_id": key[1],
+                    "distance_bin": canonical.get("distance_bin"),
+                    "stage_point_counts": dict(counts),
+                    "associated_cluster_point_count": fragment["associated_cluster_point_count"],
+                    "associated_union_point_count": fragment["associated_union_point_count"],
+                    "associated_union_gt_clipped_point_count": fragment["associated_union_gt_clipped_point_count"],
+                    "O1": dict(fragment["O1"]),
+                    "O2": dict(fragment["O2"]),
+                    "O2_gt_clipped": dict(fragment["O2_gt_clipped"]),
+                    "O3": dict(stage["O3"]),
+                    "O4": dict(stage["O4"]),
+                    "O5": dict(stage["O5"]),
+                    "O6": dict(stage["O6"]),
+                    "signed_deltas": {
+                        "O2_minus_O1": fragment["signed_deltas"]["O2_minus_O1"],
+                        "O2_gt_clipped_minus_O2": fragment["signed_deltas"]["O2_gt_clipped_minus_O2"],
+                        "O3_minus_O2": _signed_oracle_delta(stage["O3"], fragment["O2"]),
+                        "O3_minus_O2_gt_clipped": _signed_oracle_delta(stage["O3"], fragment["O2_gt_clipped"]),
+                        "O4_minus_O3": stage["signed_deltas"]["O4_minus_O3"],
+                        "O5_minus_O4": stage["signed_deltas"]["O5_minus_O4"],
+                        "O6_minus_O5": stage["signed_deltas"]["O6_minus_O5"],
+                    },
+                }
+            )
+        return outputs
+
+    return {
+        "schema_version": STAGE_ORACLE_SCHEMA_VERSION,
+        "source_day1_schema_version": POINT_RETENTION_SCHEMA_VERSION,
+        "source_day2_schema_version": FRAGMENT_ORACLE_SCHEMA_VERSION,
+        "candidate_variant": candidate_variant,
+        "canonical_count_gate_passed": True,
+        "delta_gt_count": int(len(day1_delta)),
+        "p1_control_gt_count": int(len(day1_control)),
+        "delta_records": join(day1_delta, day1_delta, day2_delta),
+        "p1_control_records": join(day1_control, day1_control, day2_control),
     }

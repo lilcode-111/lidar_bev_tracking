@@ -120,10 +120,11 @@ def build_failure_evidence_report(
     candidate_conversion = None
     cluster_separability = None
     fragment_recoverability = None
+    stage_recoverability = None
     if candidate_variant is not None:
         from bev_tracking.candidate_conversion import build_candidate_conversion_report
         from bev_tracking.cluster_separability import build_frame_cluster_groups
-        from bev_tracking.point_retention import build_frame_fragment_oracles
+        from bev_tracking.point_retention import build_frame_fragment_oracles, build_frame_stage_oracles
 
         candidate_conversion = build_candidate_conversion_report(
             frame_id=frame_id,
@@ -146,14 +147,22 @@ def build_failure_evidence_report(
             raw_detections=raw_detections,
             gt_boxes=gt_boxes,
         )
-        fragment_recoverability = build_frame_fragment_oracles(
-            frame_id=frame_id,
-            variant=candidate_variant,
-            gt_boxes=gt_boxes,
-            clusters=clusters,
-            raw_detections=raw_detections,
-            candidate_conversion=candidate_conversion,
-        )
+        if candidate_variant == "C1":
+            fragment_recoverability = build_frame_fragment_oracles(
+                frame_id=frame_id,
+                variant=candidate_variant,
+                gt_boxes=gt_boxes,
+                clusters=clusters,
+                raw_detections=raw_detections,
+                candidate_conversion=candidate_conversion,
+            )
+            stage_recoverability = build_frame_stage_oracles(
+                frame_id=frame_id,
+                variant=candidate_variant,
+                stages=stages,
+                gt_boxes=gt_boxes,
+                candidate_conversion=candidate_conversion,
+            )
 
     return {
         "schema_version": FAILURE_EVIDENCE_SCHEMA_VERSION,
@@ -189,6 +198,7 @@ def build_failure_evidence_report(
         "candidate_conversion": candidate_conversion,
         "cluster_separability": cluster_separability,
         "fragment_recoverability": fragment_recoverability,
+        "stage_recoverability": stage_recoverability,
     }
 
 
