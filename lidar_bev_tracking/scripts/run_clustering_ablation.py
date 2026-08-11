@@ -24,6 +24,7 @@ from bev_tracking.point_retention import (
     build_point_retention_day1,
     build_point_retention_day2,
     build_point_retention_day3,
+    build_point_retention_day4,
 )
 from bev_tracking.failure_evidence_batch import load_diagnostic_manifest
 from bev_tracking.kitti import (
@@ -97,6 +98,9 @@ def main():
     point_retention_day3 = build_point_retention_day3(
         point_retention_day1, point_retention_day2, reports_by_variant
     )
+    point_retention_day4 = build_point_retention_day4(
+        point_retention_day1, point_retention_day3
+    )
     output = {
         "schema_version": "15.2-ablation",
         "source": {
@@ -116,6 +120,7 @@ def main():
         "point_retention_day1": point_retention_day1,
         "point_retention_day2": point_retention_day2,
         "point_retention_day3": point_retention_day3,
+        "point_retention_day4": point_retention_day4,
         "review_supplement": build_review_supplement_day2(reports_by_variant),
     }
     output_path = Path(args.output)

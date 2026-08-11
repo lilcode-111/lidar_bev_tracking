@@ -10,10 +10,12 @@ from bev_tracking.oriented_box import estimate_oriented_box_xy
 POINT_RETENTION_SCHEMA_VERSION = "15.3.2-point-retention-day1"
 FRAGMENT_ORACLE_SCHEMA_VERSION = "15.3.2-fragment-oracles-day2"
 STAGE_ORACLE_SCHEMA_VERSION = "15.3.2-stage-oracles-day3"
+ROOT_CAUSE_SCHEMA_VERSION = "15.3.2-root-cause-day4"
 STAGE_ORDER = ("raw", "roi", "z_filter", "intensity_filter")
 PCA_STATUS_VALUES = ("valid", "insufficient_points", "degenerate_geometry")
 PCA_MIN_POINTS = 3
 MATERIAL_GAIN_IOU = 0.10
+RECOVERABLE_IOU = 0.25
 
 
 def pca_input_status(points):
@@ -467,4 +469,212 @@ def build_point_retention_day3(day1, day2, reports_by_variant):
         "p1_control_gt_count": int(len(day1_control)),
         "delta_records": join(day1_delta, day1_delta, day2_delta),
         "p1_control_records": join(day1_control, day1_control, day2_control),
+    }
+
+
+def attribute_point_retention_record(record, material_gain_iou=MATERIAL_GAIN_IOU):
+    """Apply the preregistered ladder without changing or filling missing evidence."""
+    if material_gain_iou <= 0.0:
+        raise ValueError("material gain threshold must be positive")
+    required_oracles = ("O1", "O2", "O2_gt_clipped", "O3", "O4", "O5", "O6")
+    if any(not isinstance(record.get(name), dict) for name in required_oracles):
+        raise ValueError("root-cause attribution requires the complete O1-O6 ladder")
+    deltas = record.get("signed_deltas")
+    if not isinstance(deltas, dict):
+        raise ValueError("root-cause attribution requires signed ladder deltas")
+
+    signal_sources = {
+        "CLUSTER_FRAGMENTATION_LIMITED": ("O2_minus_O1",),
+        "CLUSTER_FORMATION_LIMITED": (
+            "O2_gt_clipped_minus_O2", "O3_minus_O2_gt_clipped",
+        ),
+        "INTENSITY_FILTER_LIMITED": ("O4_minus_O3",),
+        "Z_FILTER_LIMITED": ("O5_minus_O4",),
+        "ROI_FILTER_LIMITED": ("O6_minus_O5",),
+    }
+    material_sources = {
+        label: [
+            name for name in names
+            if deltas.get(name) is not None and float(deltas[name]) >= material_gain_iou
+        ]
+        for label, names in signal_sources.items()
+    }
+    material_signals = [label for label, sources in material_sources.items() if sources]
+    raw_iou = record["O6"].get("iou")
+    raw_recoverable = raw_iou is not None and float(raw_iou) >= RECOVERABLE_IOU
+    if len(material_signals) > 1:
+        root_cause = "MIXED"
+    elif len(material_signals) == 1:
+        root_cause = material_signals[0]
+    elif not raw_recoverable:
+        root_cause = "RAW_GEOMETRY_OBSERVABILITY_LIMITED"
+    else:
+        root_cause = "UNRESOLVED"
+    return {
+        "root_cause": root_cause,
+        "material_signals": material_signals,
+        "material_signal_sources": {
+            label: sources for label, sources in material_sources.items() if sources
+        },
+        "material_gain_iou": float(material_gain_iou),
+        "raw_recoverable_iou": float(RECOVERABLE_IOU),
+        "raw_recoverable": bool(raw_recoverable),
+    }
+
+
+def _numeric_summary(values):
+    values = [float(value) for value in values if value is not None]
+    if not values:
+        return {"count": 0, "min": None, "median": None, "mean": None, "max": None}
+    array = np.asarray(values, dtype=np.float64)
+    return {
+        "count": int(len(array)),
+        "min": float(np.min(array)),
+        "median": float(np.median(array)),
+        "mean": float(np.mean(array)),
+        "max": float(np.max(array)),
+    }
+
+
+def _summarize_oracle(records, oracle_name):
+    values = [record[oracle_name].get("iou") for record in records]
+    summary = _numeric_summary(values)
+    valid_values = [float(value) for value in values if value is not None]
+    summary.update({
+        "null_count": int(len(values) - len(valid_values)),
+        "iou_ge_0_25_count": int(sum(value >= 0.25 for value in valid_values)),
+        "iou_ge_0_50_count": int(sum(value >= 0.50 for value in valid_values)),
+    })
+    return summary
+
+
+def _summarize_delta(records, delta_name):
+    values = [record["signed_deltas"].get(delta_name) for record in records]
+    summary = _numeric_summary(values)
+    valid_values = [float(value) for value in values if value is not None]
+    summary.update({
+        "null_count": int(len(values) - len(valid_values)),
+        "positive_count": int(sum(value > 0.0 for value in valid_values)),
+        "negative_count": int(sum(value < 0.0 for value in valid_values)),
+        "material_gain_count": int(sum(value >= MATERIAL_GAIN_IOU for value in valid_values)),
+    })
+    return summary
+
+
+def _summarize_point_retention_cohort(records):
+    root_cause_counts = {}
+    for record in records:
+        label = record["attribution"]["root_cause"]
+        root_cause_counts[label] = root_cause_counts.get(label, 0) + 1
+    ordered_counts = dict(sorted(root_cause_counts.items()))
+    if ordered_counts:
+        ranked = sorted(ordered_counts.items(), key=lambda item: (-item[1], item[0]))
+        unique_dominant = len(ranked) == 1 or ranked[0][1] > ranked[1][1]
+        dominant_label = ranked[0][0] if unique_dominant else None
+        dominant_count = ranked[0][1] if unique_dominant else 0
+    else:
+        dominant_label, dominant_count = None, 0
+    count = len(records)
+    count_fields = (
+        "associated_cluster_point_count", "associated_union_point_count",
+        "associated_union_gt_clipped_point_count",
+    )
+    stage_fields = {
+        "raw": "raw", "post_roi": "roi", "post_z": "z_filter",
+        "post_intensity": "intensity_filter",
+    }
+    distance_breakdown = {}
+    for record in records:
+        distance_bin = record.get("distance_bin")
+        label = record["attribution"]["root_cause"]
+        bucket = distance_breakdown.setdefault(distance_bin, {"count": 0, "root_cause_counts": {}})
+        bucket["count"] += 1
+        bucket["root_cause_counts"][label] = bucket["root_cause_counts"].get(label, 0) + 1
+    for bucket in distance_breakdown.values():
+        bucket["root_cause_counts"] = dict(sorted(bucket["root_cause_counts"].items()))
+    delta_names = (
+        "O2_minus_O1", "O2_gt_clipped_minus_O2", "O3_minus_O2",
+        "O3_minus_O2_gt_clipped", "O4_minus_O3", "O5_minus_O4", "O6_minus_O5",
+    )
+    return {
+        "gt_count": int(count),
+        "root_cause_counts": ordered_counts,
+        "dominant_root_cause": dominant_label,
+        "dominant_root_cause_count": int(dominant_count),
+        "dominant_root_cause_ratio": float(dominant_count / count) if count and dominant_label else None,
+        "majority_reached": bool(count and dominant_label and dominant_count > count / 2.0),
+        "oracle_iou": {
+            name: _summarize_oracle(records, name)
+            for name in ("O1", "O2", "O2_gt_clipped", "O3", "O4", "O5", "O6")
+        },
+        "signed_deltas": {name: _summarize_delta(records, name) for name in delta_names},
+        "point_counts": {
+            **{field: _numeric_summary(record[field] for record in records) for field in count_fields},
+            **{
+                label: _numeric_summary(record["stage_point_counts"][field] for record in records)
+                for label, field in stage_fields.items()
+            },
+        },
+        "distance_breakdown": dict(sorted(distance_breakdown.items())),
+    }
+
+
+def build_point_retention_day4(day1, day3):
+    """Attribute and aggregate the frozen delta/P1 ladders for final review."""
+    if not isinstance(day1, dict) or day1.get("schema_version") != POINT_RETENTION_SCHEMA_VERSION:
+        raise ValueError("Day 4 requires a valid point-retention Day 1 result")
+    if not isinstance(day3, dict) or day3.get("schema_version") != STAGE_ORACLE_SCHEMA_VERSION:
+        raise ValueError("Day 4 requires a valid point-retention Day 3 result")
+    if day3.get("candidate_variant") != day1.get("candidate_variant"):
+        raise ValueError("Day 1 and Day 3 candidate variants differ")
+    contract = day1.get("attribution_contract") or {}
+    if float(contract.get("material_gain_iou", -1.0)) != MATERIAL_GAIN_IOU:
+        raise ValueError("Day 1 material gain threshold differs from Day 4")
+    expected_labels = set(contract.get("labels", []))
+
+    def attribute(records, expected_count, cohort_name):
+        if len(records) != int(expected_count):
+            raise ValueError(f"{cohort_name} record count differs from Day 3 metadata")
+        seen = set()
+        outputs = []
+        for source in records:
+            key = (str(source["frame_id"]).zfill(6), str(source["gt_id"]))
+            if key in seen:
+                raise ValueError(f"duplicate Day 4 GT record: {key}")
+            seen.add(key)
+            output = dict(source)
+            output["attribution"] = attribute_point_retention_record(source)
+            if output["attribution"]["root_cause"] not in expected_labels:
+                raise ValueError("Day 4 root cause is absent from Day 1 contract")
+            outputs.append(output)
+        return outputs
+
+    delta_records = attribute(day3.get("delta_records", []), day3.get("delta_gt_count", -1), "delta")
+    control_records = attribute(
+        day3.get("p1_control_records", []), day3.get("p1_control_gt_count", -1), "P1 control"
+    )
+    if len(delta_records) != int(day1.get("delta_gt_count", -1)):
+        raise ValueError("Day 4 delta cohort differs from frozen Day 1 cohort")
+    if len(control_records) != int(day1.get("p1_control_gt_count", -1)):
+        raise ValueError("Day 4 P1 cohort differs from frozen Day 1 cohort")
+    return {
+        "schema_version": ROOT_CAUSE_SCHEMA_VERSION,
+        "source_day1_schema_version": POINT_RETENTION_SCHEMA_VERSION,
+        "source_day3_schema_version": STAGE_ORACLE_SCHEMA_VERSION,
+        "candidate_variant": day1["candidate_variant"],
+        "attribution_policy": {
+            "material_gain_iou": float(MATERIAL_GAIN_IOU),
+            "raw_recoverable_iou": float(RECOVERABLE_IOU),
+            "multiple_material_signals": "MIXED",
+            "raw_limited_only_without_material_stage_signal": True,
+            "cluster_formation_delta_sources": [
+                "O2_gt_clipped_minus_O2", "O3_minus_O2_gt_clipped",
+            ],
+        },
+        "delta_gt_count": int(len(delta_records)),
+        "p1_control_gt_count": int(len(control_records)),
+        "delta_records": delta_records,
+        "p1_control_records": control_records,
+        "delta_summary": _summarize_point_retention_cohort(delta_records),
+        "p1_control_summary": _summarize_point_retention_cohort(control_records),
     }
