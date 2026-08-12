@@ -1,0 +1,206 @@
+{
+  "schema_version": "15.3.2-closure-archive-v1",
+  "subject": "15.3.2 Car Point Retention & Fragment Recoverability Diagnostic",
+  "status": "CLOSED",
+  "archive_status": "COMPLETE",
+  "code_identity": {
+    "repository": "https://github.com/lilcode-111/lidar_bev_tracking",
+    "branch": "fix/v15-3-2-o2-point-identity",
+    "commit": "8ec0bd37b591278dc61c97b34b87ae888517ddc8",
+    "git_dirty": false,
+    "patch_artifact_required": false
+  },
+  "data_identity": {
+    "manifest_path": "configs/kitti_diagnostic_frames.txt",
+    "manifest_sha256": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+    "num_frames": 25,
+    "ordered_frame_ids": [
+      "000386", "000424", "001163", "001794", "002060",
+      "003311", "003676", "004027", "004438", "004588",
+      "004784", "004790", "004978", "005016", "005084",
+      "005189", "005321", "005427", "005544", "006220",
+      "006900", "007046", "007192", "007360", "007392"
+    ],
+    "config_path": "configs/experiments/v15/c123_preregistered.yaml",
+    "config_sha256": "4fdf9d4f0217a33a4c20fa11c97c3f3c9d1f0c8a6b9367b11b9733fa4ec5618d",
+    "oracle_eligible_gt_count": 95,
+    "eligible_gt_role": "15.3.2 Oracle eligibility cohort",
+    "does_not_redefine_positive_gt": true,
+    "eligible_gt_key_identity": "(frame_id, gt_id)",
+    "eligible_gt_key_set_sha256": {
+      "C0": "0bd4a0a92f4ef10f467e144d0d3d09cadd19989dfa5dde0d2999cda5f9c1f3d4",
+      "C1": "0bd4a0a92f4ef10f467e144d0d3d09cadd19989dfa5dde0d2999cda5f9c1f3d4",
+      "C2": "0bd4a0a92f4ef10f467e144d0d3d09cadd19989dfa5dde0d2999cda5f9c1f3d4",
+      "C3": "0bd4a0a92f4ef10f467e144d0d3d09cadd19989dfa5dde0d2999cda5f9c1f3d4"
+    },
+    "eligible_gt_key_sets_equal": true
+  },
+  "source_artifacts": {
+    "candidate_conversion": {
+      "path": "outputs/clustering_diagnostic/v15_3_2_point_retention_25frames.json",
+      "container_schema_version": "15.2-ablation",
+      "component_selector": "delta_cohort and diagnostics.* candidate-conversion evidence",
+      "component_schema_version": null,
+      "component_schema_note": "The embedded delta_cohort has no independent schema_version; the canonical file schema is recorded.",
+      "sha256": "c4f9f56f9fef7f2a7916dbeba7912cf9b50f805d2c5b3bcb70921968d73889fd",
+      "hash_scope": "container_file"
+    },
+    "cluster_separability": {
+      "path": "outputs/clustering_diagnostic/v15_3_2_point_retention_25frames.json",
+      "container_schema_version": "15.2-ablation",
+      "component_selector": "cluster_separability_diagnostic",
+      "component_schema_version": "15.3.1-cluster-separability-day3",
+      "sha256": "c4f9f56f9fef7f2a7916dbeba7912cf9b50f805d2c5b3bcb70921968d73889fd",
+      "hash_scope": "container_file"
+    },
+    "point_retention_final": {
+      "path": "outputs/clustering_diagnostic/v15_3_2_o2_point_identity_corrected.json",
+      "schema_version": "15.3.2-o2-point-identity-fix",
+      "sha256": "28e292150fc7872e1180d07d74c1eb1811172daaf8f2193541e1ba64d1b370e6",
+      "canonical": true,
+      "supersedes_coordinate_dedup_result": true
+    }
+  },
+  "schema_contract": {
+    "day1": "15.3.2-point-retention-day1",
+    "day2": "15.3.2-fragment-oracles-day2",
+    "day3": "15.3.2-stage-oracles-day3",
+    "day4": "15.3.2-root-cause-day4"
+  },
+  "identity_contract": {
+    "gt_identity": "(frame_id, gt_id)",
+    "cluster_identity": "(variant, frame_id, cluster_id)",
+    "source_point_identity": "(frame_id, raw_lidar_point_index)",
+    "raw_lidar_point_index_definition": "frame-local raw LiDAR array row identity",
+    "coordinate_identity_is_source_identity": false
+  },
+  "o2_fragment_union_contract": {
+    "point_identity": "raw_lidar_point_index",
+    "union_operator": "unique_source_index",
+    "coordinate_row_dedup": false,
+    "reconstruct_from": "raw_points[source_indices]",
+    "source_alignment_gate": "required",
+    "o2_point_identity_fix_applied": true
+  },
+  "o2_fix_audit": {
+    "unchanged_o2_iou_count": 21,
+    "cohort_count": 22,
+    "changed_record": {
+      "frame_id": "004978",
+      "gt_id": "gt_4",
+      "before": 0.1100404442113898,
+      "after": 0.11004332577922803,
+      "delta": 0.000002881567838231014
+    },
+    "o2_minus_o1_material_gain": {"before": 0, "after": 0, "denominator": 22},
+    "o3_minus_o2_gt_clipped_material_gain": {"before": 4, "after": 4, "denominator": 22},
+    "original_cluster_formation_plus_intensity_samples": [
+      ["001163", "gt_1"],
+      ["004790", "gt_5"],
+      ["005427", "gt_3"],
+      ["007360", "gt_4"]
+    ],
+    "original_mixed_samples_unchanged": true,
+    "root_cause_changed_after_o2_fix": false
+  },
+  "oracle_ladder_contract": {
+    "O1": "current associated cluster",
+    "O2": "associated fragment source-index union",
+    "O2_gt_clipped": "associated source-index union clipped to target GT",
+    "O3": "post-intensity GT points",
+    "O4": "post-z / pre-intensity GT points",
+    "O5": "post-ROI / pre-z GT points",
+    "O6": "raw GT points",
+    "counterfactual_only": true,
+    "evaluation_effect": "none",
+    "recoverable_iou_threshold": 0.25,
+    "material_gain_iou_threshold": 0.1
+  },
+  "canonical_point_count_gate": {
+    "status": "PASS",
+    "O3": "canonical intensity-stage point count",
+    "O4": "canonical z-stage point count",
+    "O5": "canonical ROI-stage point count",
+    "O6": "canonical raw-stage point count",
+    "additional_point_set_hash_gate_required": false
+  },
+  "cohort_contract": {
+    "delta_gt_count": 22,
+    "delta_identity": "(frame_id, gt_id)",
+    "delta_role": "formal_root_cause_cohort",
+    "oracle_eligible_gt_count": 95,
+    "oracle_eligible_role": "diagnostic_eligibility_only",
+    "p1_role": "positive_control",
+    "p1_included_in_delta_root_cause_ratio": false
+  },
+  "final_oracle_results": {
+    "O1": {"median_iou": 0.02047825780999854, "iou_ge_0_25": 0, "denominator": 22},
+    "O2": {"median_iou": 0.02047825780999854, "iou_ge_0_25": 0, "denominator": 22},
+    "O3": {"median_iou": 0.04791839478828744, "iou_ge_0_25": 2, "denominator": 22},
+    "O4": {"median_iou": 0.5009401154503632, "iou_ge_0_25": 20, "iou_ge_0_50": 11, "denominator": 22},
+    "O5": {"median_iou": 0.5969660280962499, "iou_ge_0_25": 21, "iou_ge_0_50": 14, "denominator": 22},
+    "O6": {"identical_to": "O5", "iou_ge_0_25": 21, "iou_ge_0_50": 14, "denominator": 22}
+  },
+  "material_gain_results": {
+    "O2_minus_O1": {"count": 0, "denominator": 22},
+    "O3_minus_O2_gt_clipped": {"count": 4, "denominator": 22},
+    "O4_minus_O3": {"count": 20, "denominator": 22, "core_evidence": true},
+    "O5_minus_O4": {"count": 4, "denominator": 22},
+    "O6_minus_O5": {"count": 0, "denominator": 22}
+  },
+  "root_cause_attribution": {
+    "INTENSITY_FILTER_LIMITED": 13,
+    "MIXED": 7,
+    "mixed_breakdown": {
+      "CLUSTER_FORMATION_LIMITED+INTENSITY_FILTER_LIMITED": 4,
+      "INTENSITY_FILTER_LIMITED+Z_FILTER_LIMITED": 3
+    },
+    "Z_FILTER_LIMITED": 1,
+    "RAW_GEOMETRY_OBSERVABILITY_LIMITED": 1,
+    "conservation_total": 22
+  },
+  "mechanism_conclusion": {
+    "statement": "For the fixed 25-frame C0-to-C1 delta-22 cohort, intensity_min=0.38 is the primary vehicle-point representation-loss mechanism.",
+    "applies_to": "fixed_25_frame_delta_22_cohort",
+    "does_not_claim": "all_KITTI_Car_FN_are_intensity_limited",
+    "cluster_fragmentation": "not_primary_for_delta22",
+    "cluster_formation": "secondary",
+    "z_filter": "secondary",
+    "raw_geometry_observability": "minority_case"
+  },
+  "formal_pipeline_freeze": {
+    "intensity_min_modified": false,
+    "z_min_modified": false,
+    "clustering_modified": false,
+    "classifier_modified": false,
+    "formal_pca_modified": false,
+    "nms_modified": false,
+    "evaluation_policy_modified": false,
+    "formal_tp_fp_fn_changed": false
+  },
+  "review_status": {
+    "algorithm": "APPROVE",
+    "data_evaluation": "APPROVE",
+    "architecture": "APPROVE_WITH_MINOR_CHANGES",
+    "product": "APPROVE_WITH_MINOR_CHANGES",
+    "minor_change": "v15_3_2_closure.json"
+  },
+  "validation_gates": {
+    "git_identity_recorded": "PASS",
+    "git_clean": "PASS",
+    "manifest_identity": "PASS",
+    "eligible_gt_key_sets_equal": "PASS",
+    "source_artifacts_identified": "PASS",
+    "o2_source_identity": "PASS",
+    "canonical_stage_point_counts": "PASS",
+    "delta_cohort_conservation": "PASS",
+    "root_cause_conservation": "PASS",
+    "formal_pipeline_unchanged": "PASS",
+    "review_complete": "PASS"
+  },
+  "next_stage": {
+    "name": "15.4 Intensity Filter Policy Ablation",
+    "source_diagnostic_sha256": "28e292150fc7872e1180d07d74c1eb1811172daaf8f2193541e1ba64d1b370e6",
+    "may_reference_but_not_overwrite_15_3_2": true
+  }
+}
