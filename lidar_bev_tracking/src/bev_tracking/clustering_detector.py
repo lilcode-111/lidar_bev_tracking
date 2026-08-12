@@ -16,6 +16,23 @@ def split_obstacle_filter_stages(
     z_min=DEFAULT_Z_MIN,
     intensity_min=DEFAULT_INTENSITY_MIN,
 ):
+    stages, _ = split_obstacle_filter_stages_with_indices(
+        points, x_range=x_range, y_range=y_range, z_min=z_min,
+        intensity_min=intensity_min,
+    )
+    return stages
+
+
+def split_obstacle_filter_stages_with_indices(
+    points,
+    x_range=(0.0, 40.0),
+    y_range=(-20.0, 20.0),
+    z_min=DEFAULT_Z_MIN,
+    intensity_min=DEFAULT_INTENSITY_MIN,
+):
+    """Return frozen filter stages plus their original raw-LiDAR row indices."""
+    points = np.asarray(points)
+    raw_indices = np.arange(len(points), dtype=np.int64)
     roi_mask = (
         (points[:, 0] >= x_range[0])
         & (points[:, 0] < x_range[1])
@@ -23,14 +40,29 @@ def split_obstacle_filter_stages(
         & (points[:, 1] < y_range[1])
     )
     roi_points = points[roi_mask]
-    z_filtered_points = roi_points[roi_points[:, 2] >= z_min]
-    intensity_filtered_points = z_filtered_points[z_filtered_points[:, 3] >= intensity_min]
-    return {
+    roi_indices = raw_indices[roi_mask]
+    z_mask = roi_points[:, 2] >= z_min
+    z_filtered_points = roi_points[z_mask]
+    z_indices = roi_indices[z_mask]
+    intensity_mask = z_filtered_points[:, 3] >= intensity_min
+    intensity_filtered_points = z_filtered_points[intensity_mask]
+    intensity_indices = z_indices[intensity_mask]
+    stages = {
         "raw": points,
         "roi": roi_points,
         "z_filter": z_filtered_points,
         "intensity_filter": intensity_filtered_points,
     }
+    stage_source_indices = {
+        "raw": raw_indices,
+        "roi": roi_indices,
+        "z_filter": z_indices,
+        "intensity_filter": intensity_indices,
+    }
+    for stage_name in stages:
+        if not np.array_equal(points[stage_source_indices[stage_name]], stages[stage_name]):
+            raise AssertionError(f"stage source point indices are misaligned: {stage_name}")
+    return stages, stage_source_indices
 
 
 def filter_obstacle_points(
@@ -75,6 +107,11 @@ def _region_query(point_idx, points_xy, grid, coords, eps):
 
 
 def euclidean_cluster(points, eps=0.6, min_points=20):
+    return [points[indices] for indices in euclidean_cluster_indices(points, eps, min_points)]
+
+
+def euclidean_cluster_indices(points, eps=0.6, min_points=20):
+    """Return deterministic membership positions in the clustering input array."""
     if len(points) == 0:
         return []
 
@@ -111,7 +148,7 @@ def euclidean_cluster(points, eps=0.6, min_points=20):
                 clustered[idx] = True
                 cluster_indices.append(idx)
 
-        clusters.append(points[cluster_indices])
+        clusters.append(np.asarray(cluster_indices, dtype=np.int64))
 
     return clusters
 

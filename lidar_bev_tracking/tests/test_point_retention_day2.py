@@ -46,14 +46,26 @@ def canonical_payload(clusters, detections, iou_offset=0.0):
     }
 
 
+def provenance(clusters):
+    raw_points = np.vstack(clusters)
+    source_indices = []
+    start = 0
+    for cluster in clusters:
+        source_indices.append(np.arange(start, start + len(cluster), dtype=np.int64))
+        start += len(cluster)
+    return raw_points, source_indices
+
+
 class PointRetentionDay2Test(unittest.TestCase):
     def test_fragment_union_improves_over_best_single_fragment(self):
         clusters = [rectangle(8.2, 9.6), rectangle(10.4, 11.8)]
         detections = [cluster_to_oriented_box(cluster, index + 1) for index, cluster in enumerate(clusters)]
+        raw_points, source_indices = provenance(clusters)
         payload = build_frame_fragment_oracles(
             frame_id="1", variant="C1", gt_boxes=[car_box()], clusters=clusters,
             raw_detections=detections,
             candidate_conversion=canonical_payload(clusters, detections),
+            raw_points=raw_points, cluster_source_point_indices=source_indices,
         )
         record = payload["records"][0]
         self.assertEqual(record["associated_cluster_count"], 2)
@@ -63,12 +75,14 @@ class PointRetentionDay2Test(unittest.TestCase):
     def test_union_deduplicates_exact_source_points(self):
         left = rectangle(8.2, 9.6)
         right = rectangle(10.4, 11.8)
-        right = np.vstack([right, left[0]])
-        clusters = [left, right]
+        raw_points = np.vstack([left, right])
+        clusters = [raw_points[:4], np.vstack([raw_points[4:], raw_points[0]])]
+        source_indices = [np.arange(4), np.asarray([4, 5, 6, 7, 0])]
         detections = [cluster_to_oriented_box(cluster, index + 1) for index, cluster in enumerate(clusters)]
         record = build_frame_fragment_oracles(
             frame_id="1", variant="C1", gt_boxes=[car_box()], clusters=clusters,
             raw_detections=detections, candidate_conversion=canonical_payload(clusters, detections),
+            raw_points=raw_points, cluster_source_point_indices=source_indices,
         )["records"][0]
         self.assertEqual(record["duplicate_union_point_count"], 1)
         self.assertEqual(record["associated_union_point_count"], 8)
@@ -76,9 +90,11 @@ class PointRetentionDay2Test(unittest.TestCase):
     def test_gt_clipped_control_separates_cluster_contamination(self):
         cluster = np.vstack([rectangle(8.2, 11.8), rectangle(13.0, 14.0)])
         detection = cluster_to_oriented_box(cluster, 1)
+        raw_points, source_indices = provenance([cluster])
         record = build_frame_fragment_oracles(
             frame_id="1", variant="C1", gt_boxes=[car_box()], clusters=[cluster],
             raw_detections=[detection], candidate_conversion=canonical_payload([cluster], [detection]),
+            raw_points=raw_points, cluster_source_point_indices=source_indices,
         )["records"][0]
         self.assertLess(record["associated_union_gt_clipped_point_count"], record["associated_union_point_count"])
         self.assertGreater(record["O2_gt_clipped"]["iou"], record["O2"]["iou"])
@@ -86,11 +102,13 @@ class PointRetentionDay2Test(unittest.TestCase):
     def test_o1_must_match_canonical_candidate_iou(self):
         cluster = rectangle(8.5, 9.5)
         detection = cluster_to_oriented_box(cluster, 1)
+        raw_points, source_indices = provenance([cluster])
         with self.assertRaisesRegex(ValueError, "O1 differs"):
             build_frame_fragment_oracles(
                 frame_id="1", variant="C1", gt_boxes=[car_box()], clusters=[cluster],
                 raw_detections=[detection],
                 candidate_conversion=canonical_payload([cluster], [detection], iou_offset=0.01),
+                raw_points=raw_points, cluster_source_point_indices=source_indices,
             )
 
     def test_run_variant_frame_emits_fragment_oracle_without_mutating_canonical(self):

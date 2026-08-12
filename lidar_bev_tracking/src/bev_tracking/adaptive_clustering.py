@@ -18,14 +18,19 @@ DISTANCE_TOLERANCE_M = 1e-12
 
 def cluster_points(points, policy, implementation="grid"):
     """Unified clustering entry point with an explicit fixed/adaptive path."""
+    return [points[indices] for indices in cluster_point_indices(points, policy, implementation)]
+
+
+def cluster_point_indices(points, policy, implementation="grid"):
+    """Return membership positions without discarding point identity."""
     if not isinstance(policy, ClusteringPolicy):
         raise TypeError("policy must be a ClusteringPolicy")
 
     if policy.mode == "fixed":
         # Keep C0 byte-for-byte aligned with the frozen legacy implementation.
-        from bev_tracking.clustering_detector import euclidean_cluster
+        from bev_tracking.clustering_detector import euclidean_cluster_indices
 
-        return euclidean_cluster(points, eps=policy.eps, min_points=policy.min_points)
+        return euclidean_cluster_indices(points, eps=policy.eps, min_points=policy.min_points)
 
     parameters = point_parameters(points, policy)
     if implementation == "brute_force":
@@ -34,7 +39,7 @@ def cluster_points(points, policy, implementation="grid"):
         neighbors = adaptive_grid_neighbors(points, parameters, policy.global_max_eps)
     else:
         raise ValueError("implementation must be grid or brute_force")
-    return cluster_from_neighbors(points, neighbors, parameters)
+    return cluster_indices_from_neighbors(points, neighbors, parameters)
 
 
 def clusters_equal(reference_clusters, candidate_clusters):
@@ -129,6 +134,11 @@ def core_mask(neighbors, parameters):
 
 def cluster_from_neighbors(points, neighbors, parameters):
     """Build deterministic connected components from precomputed neighbors."""
+    return [points[indices] for indices in cluster_indices_from_neighbors(points, neighbors, parameters)]
+
+
+def cluster_indices_from_neighbors(points, neighbors, parameters):
+    """Build deterministic connected-component membership positions."""
     points = np.asarray(points)
     if len(points) != len(neighbors) or len(parameters) != len(points):
         raise ValueError("points, neighbors, and parameters must have equal length")
@@ -163,6 +173,6 @@ def cluster_from_neighbors(points, neighbors, parameters):
                     assigned[neighbor_idx] = True
                     component.append(neighbor_idx)
 
-        clusters.append(points[sorted(component)])
+        clusters.append(np.asarray(sorted(component), dtype=np.int64))
 
     return clusters

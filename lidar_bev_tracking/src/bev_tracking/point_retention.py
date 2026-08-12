@@ -65,11 +65,15 @@ def build_pca_oracle(points, gt_box):
 
 
 def build_frame_fragment_oracles(
-    *, frame_id, variant, gt_boxes, clusters, raw_detections, candidate_conversion
+    *, frame_id, variant, gt_boxes, clusters, raw_detections, candidate_conversion,
+    raw_points, cluster_source_point_indices
 ):
-    """Build O1/O2/O2_gt_clipped from canonical associations without reclustering."""
+    """Build O1/O2 from canonical associations using raw-LiDAR point identity."""
     if len(clusters) != len(raw_detections):
         raise ValueError("clusters and raw_detections must have the same length")
+    if len(clusters) != len(cluster_source_point_indices):
+        raise ValueError("every cluster must have source point indices")
+    raw_points = np.asarray(raw_points)
     frame_id = str(frame_id).zfill(6)
     gt_by_id = {
         str(box["id"]): box for box in gt_boxes if classify_gt_box(box) == "positive"
@@ -80,10 +84,19 @@ def build_frame_fragment_oracles(
     evidence_by_gt = {str(item["gt_id"]): item for item in evidence}
     if set(evidence_by_gt) != set(gt_by_id):
         raise ValueError("fragment oracle GT set differs from canonical candidate evidence")
-    cluster_by_id = {
-        str(detection.get("id", f"cluster_{index + 1}")): (cluster, detection)
-        for index, (cluster, detection) in enumerate(zip(clusters, raw_detections))
-    }
+    cluster_by_id = {}
+    for index, (cluster, detection, source_indices) in enumerate(
+        zip(clusters, raw_detections, cluster_source_point_indices)
+    ):
+        source_indices = np.asarray(source_indices, dtype=np.int64)
+        if source_indices.ndim != 1 or len(source_indices) != len(cluster):
+            raise ValueError("cluster source point index count differs from cluster point count")
+        if np.any(source_indices < 0) or np.any(source_indices >= len(raw_points)):
+            raise ValueError("cluster source point index is outside raw LiDAR bounds")
+        if not np.array_equal(raw_points[source_indices], cluster):
+            raise ValueError("cluster points differ from raw LiDAR source point indices")
+        cluster_id = str(detection.get("id", f"cluster_{index + 1}"))
+        cluster_by_id[cluster_id] = (cluster, detection, source_indices)
 
     records = []
     for gt_id, canonical in evidence_by_gt.items():
@@ -97,10 +110,11 @@ def build_frame_fragment_oracles(
         }
         fragments = []
         fragment_points = []
+        fragment_source_indices = []
         for cluster_id in cluster_ids:
             if cluster_id not in cluster_by_id:
                 raise ValueError(f"canonical associated cluster is missing: {cluster_id}")
-            cluster, detection = cluster_by_id[cluster_id]
+            cluster, detection, source_indices = cluster_by_id[cluster_id]
             status = pca_input_status(cluster)
             iou = float(bev_iou(gt_box, detection)) if status == "valid" else None
             if status == "valid":
@@ -115,9 +129,11 @@ def build_frame_fragment_oracles(
                     "num_points": int(len(cluster)),
                     "iou": iou,
                     "canonical_candidate_iou": branch_iou.get(cluster_id),
+                    "source_point_indices": source_indices.tolist(),
                 }
             )
             fragment_points.append(cluster)
+            fragment_source_indices.append(source_indices)
 
         valid_fragments = [item for item in fragments if item["status"] == "valid"]
         selected = max(valid_fragments, key=lambda item: (item["iou"], item["cluster_id"])) \
@@ -128,8 +144,9 @@ def build_frame_fragment_oracles(
             "num_points": selected["num_points"] if selected else 0,
             "iou": selected["iou"] if selected else None,
         }
-        stacked = np.vstack(fragment_points)
-        union = np.unique(stacked, axis=0)
+        stacked_source_indices = np.concatenate(fragment_source_indices)
+        union_source_indices = np.unique(stacked_source_indices)
+        union = raw_points[union_source_indices]
         gt_clipped = union[points_in_oriented_3d_box(union, gt_box)]
         o2 = build_pca_oracle(union, gt_box)
         o2_gt_clipped = build_pca_oracle(gt_clipped, gt_box)
@@ -143,7 +160,11 @@ def build_frame_fragment_oracles(
                 "associated_cluster_ids": cluster_ids,
                 "associated_cluster_point_count": int(sum(len(points) for points in fragment_points)),
                 "associated_union_point_count": int(len(union)),
-                "duplicate_union_point_count": int(len(stacked) - len(union)),
+                "duplicate_union_point_count": int(
+                    len(stacked_source_indices) - len(union_source_indices)
+                ),
+                "point_identity": "raw_lidar_point_index",
+                "associated_union_source_point_indices": union_source_indices.tolist(),
                 "associated_union_gt_clipped_point_count": int(len(gt_clipped)),
                 "fragment_oracles": fragments,
                 "O1": o1,
@@ -165,6 +186,8 @@ def build_frame_fragment_oracles(
         "schema_version": FRAGMENT_ORACLE_SCHEMA_VERSION,
         "frame_id": frame_id,
         "variant": str(variant),
+        "point_identity": "raw_lidar_point_index",
+        "source_index_alignment_gate_passed": True,
         "associated_gt_count": int(len(records)),
         "records": records,
     }

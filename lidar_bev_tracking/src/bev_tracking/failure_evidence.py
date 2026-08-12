@@ -6,8 +6,8 @@ import numpy as np
 from bev_tracking.clustering_detector import (
     cluster_to_box,
     cluster_to_oriented_box,
-    euclidean_cluster,
-    split_obstacle_filter_stages,
+    euclidean_cluster_indices,
+    split_obstacle_filter_stages_with_indices,
 )
 from bev_tracking.eval_policy import classify_gt_box, is_positive_detection
 from bev_tracking.evaluation import evaluate_detections
@@ -38,17 +38,26 @@ def build_failure_evidence_report(
     candidate_variant=None,
 ):
     frame_id = str(frame_id).zfill(6)
-    stages = split_obstacle_filter_stages(
+    stages, stage_source_indices = split_obstacle_filter_stages_with_indices(
         points,
         z_min=z_min,
         intensity_min=intensity_min,
     )
     if clustering_policy is None:
-        clusters = euclidean_cluster(stages["intensity_filter"], eps=eps, min_points=min_points)
+        cluster_local_indices = euclidean_cluster_indices(
+            stages["intensity_filter"], eps=eps, min_points=min_points
+        )
     else:
-        from bev_tracking.adaptive_clustering import cluster_points
+        from bev_tracking.adaptive_clustering import cluster_point_indices
 
-        clusters = cluster_points(stages["intensity_filter"], clustering_policy)
+        cluster_local_indices = cluster_point_indices(
+            stages["intensity_filter"], clustering_policy
+        )
+    clusters = [stages["intensity_filter"][indices] for indices in cluster_local_indices]
+    cluster_source_point_indices = [
+        stage_source_indices["intensity_filter"][indices]
+        for indices in cluster_local_indices
+    ]
     box_fn = cluster_to_oriented_box if oriented else cluster_to_box
     raw_detections = [box_fn(cluster, index + 1) for index, cluster in enumerate(clusters)]
     detections_after_nms = nms_bev(raw_detections, iou_threshold=nms_iou_threshold)
@@ -155,6 +164,8 @@ def build_failure_evidence_report(
                 clusters=clusters,
                 raw_detections=raw_detections,
                 candidate_conversion=candidate_conversion,
+                raw_points=stages["raw"],
+                cluster_source_point_indices=cluster_source_point_indices,
             )
             stage_recoverability = build_frame_stage_oracles(
                 frame_id=frame_id,
