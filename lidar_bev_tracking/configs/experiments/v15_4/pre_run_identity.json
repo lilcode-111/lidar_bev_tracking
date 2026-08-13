@@ -1,0 +1,61 @@
+{
+  "schema_version": "15.4-pre-run-identity-v1",
+  "identity_version": "15.4-phase1-day1",
+  "status": "FROZEN_WITH_DECLARED_REFERENCE_GAPS",
+  "hash_contract": {"manifest": "canonical_utf8_lf", "ordered_identity": "canonical_compact_json_utf8", "json_artifact": "raw_file_bytes"},
+  "diagnostic_25": {
+    "manifest_path": "configs/kitti_diagnostic_frames.txt",
+    "manifest_sha256": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+    "ordered_frame_ids_sha256": "c0bd1b20c4888aee0e35d4facbf29a234fbd0d681129c4744cc8648dcce5f5fd",
+    "num_frames": 25,
+    "ordered_frame_ids": ["000386", "000424", "001163", "001794", "002060", "003311", "003676", "004027", "004438", "004588", "004784", "004790", "004978", "005016", "005084", "005189", "005321", "005427", "005544", "006220", "006900", "007046", "007192", "007360", "007392"]
+  },
+  "formal_100": {
+    "manifest_path": "configs/kitti_100_frames.txt",
+    "manifest_sha256": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19",
+    "ordered_frame_ids_sha256": "7ff6bfb73cbf446d0777249daa50b6f63fc780384c1f167a0aff50319bbdc11c",
+    "num_frames": 100,
+    "dataset_role": "development_validation_set",
+    "is_independent_holdout": false
+  },
+  "delta_22": {
+    "identity_key": "(frame_id, gt_id)",
+    "count": 22,
+    "ordered_identity_sha256": "69fe13b846023888f454b9c2c18c2df25edfa7128726949938c895922b694d7c",
+    "ordered_identity_list": [["000386", "gt_7"], ["001163", "gt_1"], ["001794", "gt_7"], ["002060", "gt_5"], ["003311", "gt_10"], ["003676", "gt_10"], ["003676", "gt_11"], ["003676", "gt_12"], ["004790", "gt_5"], ["004978", "gt_4"], ["005189", "gt_6"], ["005189", "gt_8"], ["005427", "gt_3"], ["005427", "gt_5"], ["007046", "gt_9"], ["007192", "gt_4"], ["007192", "gt_5"], ["007360", "gt_1"], ["007360", "gt_4"], ["007360", "gt_7"], ["007392", "gt_4"], ["007392", "gt_7"]],
+    "source_artifact": {"path": "outputs/clustering_diagnostic/v15_3_2_o2_point_identity_corrected.json", "sha256": "28e292150fc7872e1180d07d74c1eb1811172daaf8f2193541e1ba64d1b370e6", "hash_mode": "raw_file_bytes", "component": "corrected_point_retention_day2.delta_records"},
+    "runtime_rederivation_allowed": false
+  },
+  "t0_25_reference": {
+    "intensity_min": 0.38,
+    "artifact_path": "outputs/clustering_diagnostic/v15_3_2_o2_point_identity_corrected.json",
+    "artifact_sha256": "28e292150fc7872e1180d07d74c1eb1811172daaf8f2193541e1ba64d1b370e6",
+    "artifact_hash_mode": "raw_file_bytes",
+    "component": "corrected_point_retention_day3.delta_records",
+    "historical_fields_available": {"delta_22_identity": true, "post_intensity_gt_point_count": true, "diagnostic_pca_iou_O3": true, "post_intensity_source_point_index_set": false},
+    "exact_replay_contract": {"identity": "exact", "point_count": "exact", "source_point_index_set": "exact", "O3_iou_absolute_tolerance": 1e-8},
+    "reference_status": "REQUIRES_PRE_VARIANT_T0_POINT_SET_MATERIALIZATION",
+    "reference_gap_reason": "The frozen 15.3.2 artifact stores canonical O3 counts and IoU but not the complete O3 raw_lidar_point_index set."
+  },
+  "t0_100_reference": {
+    "intensity_min": 0.38,
+    "declaration_path": "configs/experiments/v15/a0_prime_geometry_corrected.json",
+    "declaration_sha256": "d114618da6b7803dea840a4ed476bfaf0dfc5bfb905fd68ea416800bdcac3344",
+    "declaration_hash_mode": "raw_file_bytes",
+    "run_id": "20260731T155421Z_kitti_car_batch_e38a8c35",
+    "commit": "e31ae77990c38888ca2316da379a87f1e904eac9",
+    "manifest_sha256": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19",
+    "config_sha256": "e38a8c3591c29b1241b84576dd74d8d76df8395769e515e0c5d6d2e9ed3a5647",
+    "summary_sha256": "d114618da6b7803dea840a4ed476bfaf0dfc5bfb905fd68ea416800bdcac3344",
+    "historical_fields_available": {"aggregate_tp_fp_fn": true, "aggregate_effective_car_detection_count": true, "frame_status": false, "positive_gt_identity": false, "candidate_identity_set": false},
+    "reference_status": "REQUIRES_PRE_VARIANT_T0_FULL_REFERENCE_MATERIALIZATION",
+    "reference_gap_reason": "The frozen A0-prime declaration contains aggregate metrics but not every identity-level field required by the 15.4 replay contract."
+  },
+  "phase_1_state": {
+    "day1_identity_locked": true,
+    "t0_exact_reference_complete": false,
+    "formal_run_authorized": false,
+    "non_t0_variant_run_allowed": false,
+    "next_required_step": "Materialize T0-only 25-frame point-set and 100-frame identity references before any T1/T2/T_off run."
+  }
+}

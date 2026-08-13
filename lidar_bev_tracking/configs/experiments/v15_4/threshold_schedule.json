@@ -1,0 +1,55 @@
+{
+  "schema_version": "15.4-threshold-schedule-v1",
+  "schedule_version": "15.4-phase1-day1",
+  "registration_status": "PRE_REGISTERED",
+  "source_round": "15.3.2",
+  "source_diagnostic_sha256": "28e292150fc7872e1180d07d74c1eb1811172daaf8f2193541e1ba64d1b370e6",
+  "source_closure_identity": {
+    "path": "docs/v15_3_2_closure.json",
+    "schema_version": "15.3.2-closure-archive-v1",
+    "sha256": "c9bf7bb1ce09292a032abeb2ef1d8a0feb3b1d609eef5f8855c4785c2a66abbe",
+    "hash_mode": "raw_file_bytes"
+  },
+  "schedule_locked_before_results": true,
+  "results_observed_at_registration": false,
+  "posthoc_threshold_addition_allowed": false,
+  "posthoc_threshold_removal_allowed": false,
+  "posthoc_threshold_change_allowed": false,
+  "allowed_config_diff_paths": ["detector.intensity_min"],
+  "variants": {
+    "T0": {"intensity_min": 0.38, "role": "baseline", "release_candidate_eligible": false, "selection_rationale": "Frozen 15.3.2 intensity-filter baseline; used only as the comparison reference."},
+    "T1": {"intensity_min": 0.30, "role": "conservative_uniform_relaxation", "release_candidate_eligible": true, "selection_rationale": "Tests a conservative reduction while retaining a nonzero intensity filter."},
+    "T2": {"intensity_min": 0.15, "role": "aggressive_nonzero_uniform_relaxation", "release_candidate_eligible": true, "selection_rationale": "Tests stronger point recovery while preserving a nonzero intensity filter."},
+    "T_off": {"intensity_min": 0.0, "role": "filter_off_diagnostic_upper_bound", "release_candidate_eligible": false, "selection_rationale": "Diagnostic upper bound only; excluded from release-candidate selection by policy."}
+  },
+  "frozen_algorithm": {
+    "clustering_mode": "fixed",
+    "eps": 0.6,
+    "min_points": 20,
+    "min_points_includes_self": true,
+    "z_min": -0.9,
+    "car_classifier": {"rule": "max(axis_length, axis_width) >= 2.0 OR num_points >= 500"},
+    "pca_box": "frozen",
+    "score": "frozen",
+    "nms": "frozen",
+    "roi": "frozen",
+    "gt_parser": "frozen"
+  },
+  "evaluation": {
+    "policy_version": "12.1",
+    "primary_iou": 0.5,
+    "auxiliary_iou": 0.25,
+    "metric_storage_unit": "fraction",
+    "replay_absolute_tolerance": 1e-8
+  },
+  "hash_contract": {
+    "manifest": "canonical_utf8_lf",
+    "ordered_identity": "canonical_compact_json_utf8",
+    "json_artifact": "raw_file_bytes"
+  },
+  "phase_1_state": {
+    "formal_results_allowed": false,
+    "formal_run_authorized": false,
+    "reason": "Day1 freezes schedule and identity only; T0 exact references and remaining validators are materialized in later Phase-1 days."
+  }
+}
