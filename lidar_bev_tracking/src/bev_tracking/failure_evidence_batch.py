@@ -160,6 +160,8 @@ def aggregate_diagnostic_reports(
     gt_candidate_records = []
     candidate_identity_records = []
     source_point_identity_records = []
+    source_point_universes = []
+    strict_background_lineage = []
     stage_point_totals = {"raw": 0, "roi": 0, "z_filter": 0, "intensity_filter": 0}
     candidate_generation_totals = {
         "cluster_count": 0,
@@ -183,6 +185,12 @@ def aggregate_diagnostic_reports(
         gt_candidate_records.extend(evidence_report.get("gt_candidate_records", []))
         candidate_identity_records.extend(evidence_report.get("candidate_identity_records", []))
         source_point_identity_records.extend(evidence_report.get("source_point_identity_records", []))
+        point_universes = evidence_report.get("source_point_universes")
+        if point_universes is not None:
+            source_point_universes.append(point_universes)
+        lineage = evidence_report.get("strict_background_lineage")
+        if lineage is not None:
+            strict_background_lineage.extend(lineage.get("records", []))
 
         for stage_name, value in evidence_report["summary"].get("stage_point_counts", {}).items():
             stage_point_totals[stage_name] += int(value)
@@ -248,6 +256,13 @@ def aggregate_diagnostic_reports(
         "gt_candidate_records": gt_candidate_records,
         "candidate_identity_records": candidate_identity_records,
         "source_point_identity_records": source_point_identity_records,
+        "source_point_universes": source_point_universes,
+        "strict_background_lineage": {
+            "schema_version": "15.4-regression-background-audit-day3-v1",
+            "unit_of_analysis": "unique_detection_identity",
+            "record_count": len(strict_background_lineage),
+            "records": strict_background_lineage,
+        },
         "frames": frame_reports,
     }
 

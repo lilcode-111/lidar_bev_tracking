@@ -15,6 +15,10 @@ from bev_tracking.geometry import bev_iou
 from bev_tracking.geometry_sanity import points_in_oriented_3d_box
 from bev_tracking.nms import nms_bev
 from bev_tracking.result_types import FailureEvidence, FailureReason, FilterStageCounts
+from bev_tracking.v15_4_audit import (
+    build_frame_source_point_universes,
+    build_strict_background_lineage,
+)
 
 
 FAILURE_EVIDENCE_SCHEMA_VERSION = "15.1"
@@ -140,6 +144,20 @@ def build_failure_evidence_report(
         stage_source_indices=stage_source_indices,
         requested_gt_keys=source_point_identity_gt_keys,
     )
+    source_point_universes = build_frame_source_point_universes(
+        frame_id=frame_id,
+        stages=stages,
+        stage_source_indices=stage_source_indices,
+        gt_boxes=gt_boxes,
+    )
+    strict_background_lineage = build_strict_background_lineage(
+        frame_id=frame_id,
+        clusters=clusters,
+        raw_detections=raw_detections,
+        detections_after_nms=detections_after_nms,
+        gt_boxes=gt_boxes,
+        evaluation=evaluation,
+    )
     candidate_conversion = None
     cluster_separability = None
     fragment_recoverability = None
@@ -221,6 +239,8 @@ def build_failure_evidence_report(
         "gt_candidate_records": gt_candidate_records,
         "candidate_identity_records": candidate_identity_records,
         "source_point_identity_records": source_point_identity_records,
+        "source_point_universes": source_point_universes,
+        "strict_background_lineage": strict_background_lineage,
         "failure_evidence": [item.to_dict() for item in evidence],
         "candidate_conversion": candidate_conversion,
         "cluster_separability": cluster_separability,
