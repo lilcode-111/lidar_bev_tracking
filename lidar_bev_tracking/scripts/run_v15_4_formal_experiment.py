@@ -10,7 +10,7 @@ from bev_tracking.report_writer import atomic_write_json
 from bev_tracking.v15_4_authorization import build_formal_run_authorization, validate_formal_run_authorization
 from bev_tracking.v15_4_formal import build_formal_run_plan, build_matrix_identity_audit, require_passed_t0_gate, validate_both_t0_replays
 from bev_tracking.v15_4_materialization import build_effective_config_matrix, build_t0_reference_artifacts, load_json
-from bev_tracking.v15_4_low_memory_audit import build_low_memory_matrix_audit
+from bev_tracking.v15_4_low_memory_audit import build_low_memory_matrix_audit, finalize_release_artifact
 
 
 def git(root, *args):
@@ -25,6 +25,7 @@ def main():
     modes.add_argument("--execute-t0", action="store_true")
     modes.add_argument("--execute-matrix", action="store_true")
     modes.add_argument("--resume-audit", action="store_true")
+    modes.add_argument("--finalize", action="store_true")
     parser.add_argument("--authorization", default="outputs/intensity_filter_ablation/pre_run/formal_run_authorization.json")
     parser.add_argument("--registry", default="configs/experiments/v15_4/t0_reference_registry.json")
     parser.add_argument("--base-config", default="configs/experiments/v15/i0_intensity_038.yaml")
@@ -41,6 +42,22 @@ def main():
         print(f"formal_run_authorized true\nformal_comparison_commit {commit}\nsaved {root / args.authorization}")
         return
     authorization = load_json(root / args.authorization)
+    if args.finalize:
+        if not clean:
+            raise RuntimeError("working tree must be clean for finalization")
+        matrix_root = (root / args.output_dir).parent
+        report_paths = {"T0": matrix_root / "T0" / "t0_replay_report.json", "T1": matrix_root / "T1" / "formal_report.json", "T2": matrix_root / "T2" / "formal_report.json", "T_off": matrix_root / "T_off" / "formal_report.json"}
+        matrix_audit = load_json(matrix_root / "matrix_identity_audit.json")
+        artifact = finalize_release_artifact(
+            report_paths, matrix_root / "matrix_identity_audit.json",
+            load_json(root / "configs/experiments/v15_4/v15_4_release_gate.json"),
+            load_json(root / "configs/experiments/v15_4/threshold_schedule.json"),
+            authorization["formal_comparison_commit"], matrix_audit["audit_recovery_commit"],
+        )
+        artifact["finalization_commit"] = commit
+        atomic_write_json(matrix_root / "v15_4_formal_experiment.json", artifact)
+        print(f"final release gates evaluated\nselected_release_candidate {artifact['selected_release_candidate']}\nsaved {matrix_root / 'v15_4_formal_experiment.json'}")
+        return
     if args.resume_audit:
         if not clean:
             raise RuntimeError("working tree must be clean for recovery audit")
