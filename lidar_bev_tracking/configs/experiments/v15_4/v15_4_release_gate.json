@@ -1,0 +1,83 @@
+{
+  "schema_version": "15.4-release-gate-v1",
+  "gate_version": "15.4-phase1-day4",
+  "registration_status": "PRE_REGISTERED",
+  "baseline_variant": "T0",
+  "candidate_variants": ["T1", "T2"],
+  "diagnostic_only_variants": ["T_off"],
+  "execution_order": ["Gate 0", "Gate A", "Gate B", "Gate C", "Gate D", "Gate E", "Gate F", "Candidate Qualified"],
+  "non_compensatory": true,
+  "cli_override_allowed": false,
+  "environment_override_allowed": false,
+  "metric_storage_unit": "fraction",
+  "gates": {
+    "Gate 0": {
+      "role": "validity",
+      "required_invariants": ["diagnostic_manifest_consistency", "formal_manifest_consistency", "delta_22_identity_consistency", "comparison_commit_consistency", "effective_config_diff", "t0_replay_25", "t0_replay_100", "dual_iou_complete", "required_artifacts_written", "source_point_monotonicity"],
+      "formal_100": {"requested": 100, "success": 100, "metric_valid": 100, "partial_success": 0, "skipped": 0, "failed": 0}
+    },
+    "Gate A": {
+      "role": "root_cause_recovery",
+      "material_recovery_iou_delta_min": 0.10,
+      "material_recovery_count_min": 6,
+      "median_iou_gain_min": 0.05,
+      "iou_ge_0_25_count_gain_min": 4,
+      "material_regression_iou_delta_max": -0.10,
+      "material_regression_count_max": 2,
+      "material_recovery_unique_frames_min": 3
+    },
+    "Gate B": {
+      "role": "downstream_penetration",
+      "candidate_net_gain_min": 2,
+      "tp_0_50_gain_min": 1,
+      "tp_0_25_gain_min": 3,
+      "f1_0_50_regression_allowed": 0.0,
+      "f1_0_25_regression_allowed": 0.0
+    },
+    "Gate C": {
+      "role": "stable_path_protection",
+      "tp_regressed_0_50_max": 0,
+      "tp_regressed_0_25_max": 1,
+      "candidate_regression_fraction_max": 0.05,
+      "candidate_regression_floor_max": 1
+    },
+    "Gate D": {
+      "role": "background_fp_cost",
+      "fp_relative_growth_max": 0.10,
+      "fp_absolute_growth_max": 50,
+      "fp_when_baseline_zero_max": 2,
+      "effective_car_relative_growth_max": 0.15,
+      "effective_car_absolute_growth_max": 75,
+      "raw_car_relative_growth_max": 0.20,
+      "raw_car_absolute_growth_max": 100,
+      "strict_background_growth_fraction_max": 0.10,
+      "strict_background_growth_floor_max": 2
+    },
+    "Gate E": {
+      "role": "gain_distribution",
+      "new_tp_unique_frames_cap": 2
+    },
+    "Gate F": {
+      "role": "regression_reason_audit",
+      "unexplained_stable_path_regression_max": 0,
+      "allowed_reasons": ["NO_ASSOCIATED_CLUSTER", "REJECTED_BY_CAR_CLASSIFIER", "REMOVED_BY_NMS", "IOU_REGRESSION", "EVALUATION_COMPETITION"]
+    },
+    "Gate G": {
+      "role": "filter_off_diagnostic",
+      "variant": "T_off",
+      "full_metrics": true,
+      "release_candidate_eligible": false,
+      "executed_gates": ["Gate 0"]
+    }
+  },
+  "selection_policy": {
+    "pareto": {
+      "maximize": ["f1_0_50", "tp_0_50", "f1_0_25", "tp_0_25"],
+      "minimize": ["fp_0_50", "effective_car_detection_growth", "strict_background_candidate_after_nms"]
+    },
+    "performance_equivalent": {"f1_0_50_abs_max": 0.001, "tp_0_50_abs_max": 1, "f1_0_25_abs_max": 0.0025, "tp_0_25_abs_max": 2},
+    "equivalent_tiebreak": ["fp_0_50", "effective_car_detection_count", "strict_background_candidate_after_nms", "candidate_regressed_gt_count", "background_car_candidate_growth", "higher_threshold"],
+    "non_pareto_non_equivalent_lexicographic": ["f1_0_50", "tp_0_50", "f1_0_25", "tp_0_25", "fp_0_50", "effective_car_detection_growth", "strict_background_candidate_after_nms", "candidate_regressed_gt_count", "background_car_candidate_growth", "higher_threshold"],
+    "final_exact_tie_preference": ["T1", "T2"]
+  }
+}
