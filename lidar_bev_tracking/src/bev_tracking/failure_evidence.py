@@ -36,6 +36,7 @@ def build_failure_evidence_report(
     source_run_id=None,
     clustering_policy=None,
     candidate_variant=None,
+    source_point_identity_gt_keys=None,
 ):
     frame_id = str(frame_id).zfill(6)
     stages, stage_source_indices = split_obstacle_filter_stages_with_indices(
@@ -126,6 +127,19 @@ def build_failure_evidence_report(
         "neutralized_detection_count": int(primary_metrics["neutralized_detections"]),
         "effective_car_detection_count": int(primary_metrics["effective_car_detection_count"]),
     }
+    candidate_identity_records = build_candidate_identity_records(
+        frame_id=frame_id,
+        clusters=clusters,
+        raw_detections=raw_detections,
+        detections_after_nms=detections_after_nms,
+    )
+    source_point_identity_records = build_source_point_identity_records(
+        frame_id=frame_id,
+        gt_boxes=positive_gt,
+        stages=stages,
+        stage_source_indices=stage_source_indices,
+        requested_gt_keys=source_point_identity_gt_keys,
+    )
     candidate_conversion = None
     cluster_separability = None
     fragment_recoverability = None
@@ -205,12 +219,77 @@ def build_failure_evidence_report(
             "primary_reason_counts": dict(sorted(reason_counts.items())),
         },
         "gt_candidate_records": gt_candidate_records,
+        "candidate_identity_records": candidate_identity_records,
+        "source_point_identity_records": source_point_identity_records,
         "failure_evidence": [item.to_dict() for item in evidence],
         "candidate_conversion": candidate_conversion,
         "cluster_separability": cluster_separability,
         "fragment_recoverability": fragment_recoverability,
         "stage_recoverability": stage_recoverability,
     }
+
+
+def build_candidate_identity_records(frame_id, clusters, raw_detections, detections_after_nms):
+    """Record deterministic diagnostic lineage without changing candidate behavior."""
+    kept_ids = {str(detection["id"]) for detection in detections_after_nms}
+    records = []
+    for index, (cluster, detection) in enumerate(zip(clusters, raw_detections), start=1):
+        detection_id = str(detection["id"])
+        records.append(
+            {
+                "frame_id": str(frame_id).zfill(6),
+                "cluster_id": f"cluster_{index}",
+                "stable_cluster_signature": array_hash(cluster),
+                "raw_detection_id": detection_id,
+                "detection_identity": f"{str(frame_id).zfill(6)}:{detection_id}",
+                "class_name": str(detection.get("class_name", "")),
+                "is_car_candidate_before_nms": bool(is_positive_detection(detection)),
+                "after_nms": bool(detection_id in kept_ids),
+            }
+        )
+    return records
+
+
+def build_source_point_identity_records(
+    *, frame_id, gt_boxes, stages, stage_source_indices, requested_gt_keys
+):
+    """Materialize source-index identity only for explicitly frozen GT keys."""
+    if not requested_gt_keys:
+        return []
+    normalized = {
+        (str(key[0]).zfill(6), str(key[1]))
+        for key in requested_gt_keys
+    }
+    records = []
+    from bev_tracking.point_retention import build_pca_oracle
+
+    for gt_box in gt_boxes:
+        key = (str(frame_id).zfill(6), str(gt_box["id"]))
+        if key not in normalized:
+            continue
+        stages_output = {}
+        for stage_name in ("raw", "roi", "z_filter", "intensity_filter"):
+            mask = points_in_oriented_3d_box(stages[stage_name], gt_box)
+            indices = np.asarray(stage_source_indices[stage_name][mask], dtype=np.int64)
+            stages_output[stage_name] = {
+                "count": int(len(indices)),
+                "source_point_indices": indices.tolist(),
+            }
+        records.append(
+            {
+                "frame_id": key[0],
+                "gt_id": key[1],
+                "point_identity": "raw_lidar_point_index",
+                "stages": stages_output,
+                "post_intensity_diagnostic_pca": build_pca_oracle(
+                    stages["intensity_filter"][
+                        points_in_oriented_3d_box(stages["intensity_filter"], gt_box)
+                    ],
+                    gt_box,
+                ),
+            }
+        )
+    return records
 
 
 def array_hash(array):

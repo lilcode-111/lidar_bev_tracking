@@ -1,0 +1,24 @@
+{
+  "schema_version": "15.4-t0-reference-index-v1",
+  "status": "MATERIALIZED",
+  "formal_variants_run": [
+    "T0"
+  ],
+  "non_t0_results_observed": false,
+  "artifacts": {
+    "t0_100_materialization_report": {
+      "path": "outputs/intensity_filter_ablation/pre_run/t0_100_materialization_report.json",
+      "sha256": "6f9448f3f16442adf5d71da6692ecef26cedf0259f51889fdf47e96e3170f2c7"
+    },
+    "t0_25_reference": {
+      "path": "outputs/intensity_filter_ablation/pre_run/t0_25_reference.json",
+      "sha256": "c76783997d7f414d93678ef31ab3fa7064af0b0a6b490e1d6f00578f2e820082"
+    },
+    "t0_100_reference": {
+      "path": "outputs/intensity_filter_ablation/pre_run/t0_100_reference.json",
+      "sha256": "973c4e6f57ba69e66011f93462c951092a83b133e47028580a4d5043855143d3"
+    }
+  },
+  "formal_run_authorized": false,
+  "next_required_step": "Freeze these artifact hashes and complete remaining Phase-1 validators before any non-T0 run."
+}

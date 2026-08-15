@@ -70,6 +70,7 @@ def run_kitti_diagnostic_failure_evidence(
     manifest_metadata=None,
     source_run_id=None,
     progress_callback=None,
+    source_point_identity_gt_keys=None,
 ):
     normalized_ids = [str(frame_id).zfill(6) for frame_id in frame_ids]
     if len(set(normalized_ids)) != len(normalized_ids):
@@ -116,6 +117,7 @@ def run_kitti_diagnostic_failure_evidence(
             eval_iou_threshold=eval_iou_threshold,
             auxiliary_iou_thresholds=auxiliary_iou_thresholds,
             source_run_id=source_run_id,
+            source_point_identity_gt_keys=source_point_identity_gt_keys,
         )
         frame_reports.append(
             {
@@ -156,6 +158,8 @@ def aggregate_diagnostic_reports(
     }
     geometry_tolerances = {}
     gt_candidate_records = []
+    candidate_identity_records = []
+    source_point_identity_records = []
     stage_point_totals = {"raw": 0, "roi": 0, "z_filter": 0, "intensity_filter": 0}
     candidate_generation_totals = {
         "cluster_count": 0,
@@ -177,6 +181,8 @@ def aggregate_diagnostic_reports(
         total_positive_gt += int(evidence_report["summary"]["num_positive_gt"])
         total_false_negatives += int(evidence_report["summary"]["num_false_negatives"])
         gt_candidate_records.extend(evidence_report.get("gt_candidate_records", []))
+        candidate_identity_records.extend(evidence_report.get("candidate_identity_records", []))
+        source_point_identity_records.extend(evidence_report.get("source_point_identity_records", []))
 
         for stage_name, value in evidence_report["summary"].get("stage_point_counts", {}).items():
             stage_point_totals[stage_name] += int(value)
@@ -240,6 +246,8 @@ def aggregate_diagnostic_reports(
             "low_iou_geometry": summarize_geometry_deltas(low_iou_deltas),
         },
         "gt_candidate_records": gt_candidate_records,
+        "candidate_identity_records": candidate_identity_records,
+        "source_point_identity_records": source_point_identity_records,
         "frames": frame_reports,
     }
 
