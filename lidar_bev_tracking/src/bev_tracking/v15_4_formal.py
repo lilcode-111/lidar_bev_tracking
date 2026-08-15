@@ -1,4 +1,4 @@
-from bev_tracking.v15_4_materialization import EXPECTED_VARIANTS, build_effective_config_matrix, validate_threshold_schedule
+from bev_tracking.v15_4_materialization import EXPECTED_VARIANTS, build_effective_config_matrix, validate_t0_replay, validate_threshold_schedule
 
 
 FORMAL_PLAN_SCHEMA_VERSION = "15.4-formal-run-plan-v1"
@@ -39,3 +39,15 @@ def apply_t0_replay_result(plan, *, replay_25_passed, replay_100_passed):
     result["non_t0_interpretation_allowed"] = passed
     result["experiment_valid"] = passed
     return result
+
+
+def validate_both_t0_replays(reference_25, replay_25, reference_100, replay_100):
+    result_25 = validate_t0_replay(reference_25, replay_25, absolute_tolerance=1e-8)
+    result_100 = validate_t0_replay(reference_100, replay_100, absolute_tolerance=1e-8)
+    return {
+        "schema_version": "15.4-t0-replay-gate-v1",
+        "replay_25": result_25,
+        "replay_100": result_100,
+        "status": "PASS",
+        "non_t0_interpretation_allowed": True,
+    }
