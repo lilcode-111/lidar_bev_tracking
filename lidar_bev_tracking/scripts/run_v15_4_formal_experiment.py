@@ -8,7 +8,7 @@ from bev_tracking.failure_evidence_batch import load_diagnostic_manifest, run_ki
 from bev_tracking.intensity_diagnostic import load_intensity_config
 from bev_tracking.report_writer import atomic_write_json
 from bev_tracking.v15_4_authorization import build_formal_run_authorization, validate_formal_run_authorization
-from bev_tracking.v15_4_formal import build_formal_run_plan, validate_both_t0_replays
+from bev_tracking.v15_4_formal import build_formal_run_plan, build_matrix_identity_audit, require_passed_t0_gate, validate_both_t0_replays
 from bev_tracking.v15_4_materialization import build_effective_config_matrix, build_t0_reference_artifacts, load_json
 
 
@@ -22,6 +22,7 @@ def main():
     modes.add_argument("--authorize", action="store_true")
     modes.add_argument("--plan-only", action="store_true")
     modes.add_argument("--execute-t0", action="store_true")
+    modes.add_argument("--execute-matrix", action="store_true")
     parser.add_argument("--authorization", default="outputs/intensity_filter_ablation/pre_run/formal_run_authorization.json")
     parser.add_argument("--registry", default="configs/experiments/v15_4/t0_reference_registry.json")
     parser.add_argument("--base-config", default="configs/experiments/v15/i0_intensity_038.yaml")
@@ -44,7 +45,10 @@ def main():
     if args.plan_only:
         print(json.dumps(build_formal_run_plan(schedule, base_config, authorization), indent=2, sort_keys=True))
         return
-    execute_t0(root, args, commit, schedule, base_config)
+    if args.execute_t0:
+        execute_t0(root, args, commit, schedule, base_config)
+    else:
+        execute_matrix(root, args, commit, schedule, base_config)
 
 
 def execute_t0(root, args, commit, schedule, base_config):
@@ -70,6 +74,29 @@ def execute_t0(root, args, commit, schedule, base_config):
     gate = validate_both_t0_replays(reference_25, replay_25, reference_100, replay_100)
     atomic_write_json(output / "t0_replay_gate.json", gate)
     print(f"T0 replay PASS\nnon_t0_interpretation_allowed true\nsaved {output / 't0_replay_gate.json'}")
+
+
+def execute_matrix(root, args, commit, schedule, base_config):
+    t0_output = root / args.output_dir
+    require_passed_t0_gate(load_json(t0_output / "t0_replay_gate.json"))
+    identity = load_json(root / "configs/experiments/v15_4/pre_run_identity.json")
+    manifest = load_diagnostic_manifest(root / identity["formal_100"]["manifest_path"])
+    matrix = build_effective_config_matrix(base_config, schedule)
+    reports = {"T0": load_json(t0_output / "t0_replay_report.json")}
+    matrix_root = t0_output.parent
+    for name in ("T1", "T2", "T_off"):
+        config = matrix[name]
+        report = run_kitti_diagnostic_failure_evidence(data_root=config["data"]["root"], frame_ids=manifest["frame_ids"],
+            eps=config["detector"]["eps"], min_points=config["detector"]["min_points"], oriented=config["detector"]["oriented"],
+            z_min=config["detector"]["z_min"], intensity_min=config["detector"]["intensity_min"], nms_iou_threshold=config["nms"]["iou_threshold"],
+            eval_iou_threshold=config["evaluation"]["iou_threshold"], auxiliary_iou_thresholds=tuple(config["evaluation"]["auxiliary_iou_thresholds"]),
+            manifest_metadata=manifest, source_run_id=f"v15_4_formal_{name.lower()}_{commit[:12]}", source_point_identity_gt_keys=identity["delta_22"]["ordered_identity_list"],
+            progress_callback=lambda i, n, frame, variant=name: print(f"[{variant} {i:03d}/{n:03d}] {frame}"))
+        reports[name] = report
+        atomic_write_json(matrix_root / name / "formal_report.json", report)
+    audit = build_matrix_identity_audit(reports)
+    atomic_write_json(matrix_root / "matrix_identity_audit.json", audit)
+    print(f"matrix execution complete\nsource_point_monotonicity PASS\nsaved {matrix_root / 'matrix_identity_audit.json'}")
 
 
 if __name__ == "__main__":
