@@ -1,0 +1,244 @@
+{
+  "schema_version": "15.4-closure-evidence-v1",
+  "status": "CLOSED",
+  "evidence_registry": {
+    "pre_run_identity": {
+      "path": "configs/experiments/v15_4/pre_run_identity.json",
+      "sha256": "80739a283acef5a6cf972fe74645855ebb1884862576b6ddea796b57bbbf304d",
+      "hash_mode": "raw_file_bytes"
+    },
+    "threshold_schedule": {
+      "path": "configs/experiments/v15_4/threshold_schedule.json",
+      "sha256": "185fee1580115b4cf5c003e4918047831c66594493c156a878c91efb402a3c26",
+      "hash_mode": "raw_file_bytes"
+    },
+    "release_gate": {
+      "path": "configs/experiments/v15_4/v15_4_release_gate.json",
+      "sha256": "f399da78f1969e7664bf861e8c91bdd01a72b93f533ee9921f57a820c1c6e05f",
+      "hash_mode": "raw_file_bytes"
+    },
+    "formal_authorization": {
+      "path": "outputs/intensity_filter_ablation/pre_run/formal_run_authorization.json",
+      "sha256": "eef50f0980296cb157e3451068bcf306d7ae2000bf6f376a569caa7c6d78e070",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t0_replay_gate": {
+      "path": "outputs/intensity_filter_ablation/formal/T0/t0_replay_gate.json",
+      "sha256": "71d7ba449b1606ddf498ff3cd4732f686e3e690a30ea3e9b6a97e071ec6444a7",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t0_25_replay": {
+      "path": "outputs/intensity_filter_ablation/formal/T0/t0_25_replay.json",
+      "sha256": "c76783997d7f414d93678ef31ab3fa7064af0b0a6b490e1d6f00578f2e820082",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t0_100_replay": {
+      "path": "outputs/intensity_filter_ablation/formal/T0/t0_100_replay.json",
+      "sha256": "973c4e6f57ba69e66011f93462c951092a83b133e47028580a4d5043855143d3",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t0_formal_report": {
+      "path": "outputs/intensity_filter_ablation/formal/T0/t0_replay_report.json",
+      "sha256": "5c3466a937dec9a8b811d34bba51b90d28f55405d9a1d3d518db05d1408d31fc",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t1_formal_report": {
+      "path": "outputs/intensity_filter_ablation/formal/T1/formal_report.json",
+      "sha256": "100084dc134c3c77a1b46b839a51ee06157fb4088ad6125655d6088f0efe93b6",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t2_formal_report": {
+      "path": "outputs/intensity_filter_ablation/formal/T2/formal_report.json",
+      "sha256": "111f231cae0701ceb00d66cfc2b8cfc79795884fc38d4b7f10d33ee885151b96",
+      "hash_mode": "raw_file_bytes"
+    },
+    "t_off_formal_report": {
+      "path": "outputs/intensity_filter_ablation/formal/T_off/formal_report.json",
+      "sha256": "358327efb435647459182e1101ea02c45161d8e43b8ff4dcba40e7e9aa39cf57",
+      "hash_mode": "raw_file_bytes"
+    },
+    "matrix_identity_audit": {
+      "path": "outputs/intensity_filter_ablation/formal/matrix_identity_audit.json",
+      "sha256": "427529458063426492e39722fa9feeeced1dfd671c86679fa2d2f19e2abf7268",
+      "hash_mode": "raw_file_bytes"
+    },
+    "formal_experiment": {
+      "path": "outputs/intensity_filter_ablation/formal/v15_4_formal_experiment.json",
+      "sha256": "1c6f2b783e256df4d9ad4ecbf97acb2adf6113896db55ab612efc841034bca66",
+      "hash_mode": "raw_file_bytes"
+    }
+  },
+  "gate0_evidence": {
+    "diagnostic_manifest_consistency": {
+      "operator": "all_equal",
+      "expected": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+      "evidence": [
+        {
+          "evidence_ref": "pre_run_identity",
+          "field": "/diagnostic_25/manifest_sha256"
+        },
+        {
+          "evidence_ref": "formal_authorization",
+          "field": "/data_identity/diagnostic_manifest_sha256"
+        }
+      ]
+    },
+    "formal_manifest_consistency": {
+      "operator": "all_equal",
+      "expected": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19",
+      "evidence": [
+        {
+          "evidence_ref": "pre_run_identity",
+          "field": "/formal_100/manifest_sha256"
+        },
+        {
+          "evidence_ref": "formal_authorization",
+          "field": "/data_identity/formal_manifest_sha256"
+        }
+      ]
+    },
+    "delta_22_identity_consistency": {
+      "operator": "all_equal",
+      "expected": "69fe13b846023888f454b9c2c18c2df25edfa7128726949938c895922b694d7c",
+      "evidence": [
+        {
+          "evidence_ref": "pre_run_identity",
+          "field": "/delta_22/ordered_identity_sha256"
+        },
+        {
+          "evidence_ref": "formal_authorization",
+          "field": "/data_identity/delta_22_identity_sha256"
+        }
+      ]
+    },
+    "comparison_commit_consistency": {
+      "operator": "all_equal",
+      "expected": "00be6dfe68561f4e4d824e9d6cf3fdc5acc0a9e9",
+      "evidence": [
+        {
+          "evidence_ref": "formal_authorization",
+          "field": "/formal_comparison_commit"
+        },
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/formal_comparison_commit"
+        },
+        {
+          "evidence_ref": "matrix_identity_audit",
+          "field": "/formal_comparison_commit"
+        }
+      ]
+    },
+    "effective_config_diff": {
+      "operator": "equals",
+      "expected": [
+        "detector.intensity_min"
+      ],
+      "evidence": [
+        {
+          "evidence_ref": "threshold_schedule",
+          "field": "/allowed_config_diff_paths"
+        }
+      ]
+    },
+    "t0_replay_25": {
+      "operator": "equals",
+      "expected": "PASS",
+      "evidence": [
+        {
+          "evidence_ref": "t0_replay_gate",
+          "field": "/replay_25/status"
+        }
+      ]
+    },
+    "t0_replay_100": {
+      "operator": "equals",
+      "expected": "PASS",
+      "evidence": [
+        {
+          "evidence_ref": "t0_replay_gate",
+          "field": "/replay_100/status"
+        }
+      ]
+    },
+    "dual_iou_complete": {
+      "operator": "contains_keys",
+      "expected": [
+        "0.50",
+        "0.25"
+      ],
+      "evidence": [
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/variant_scalar_summaries/T0/metrics_by_iou"
+        },
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/variant_scalar_summaries/T1/metrics_by_iou"
+        },
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/variant_scalar_summaries/T2/metrics_by_iou"
+        },
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/variant_scalar_summaries/T_off/metrics_by_iou"
+        }
+      ]
+    },
+    "required_artifacts_written": {
+      "operator": "field_exists",
+      "expected": true,
+      "evidence": [
+        {
+          "evidence_ref": "t0_25_replay",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "t0_100_replay",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "t0_formal_report",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "t1_formal_report",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "t2_formal_report",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "t_off_formal_report",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "matrix_identity_audit",
+          "field": "/schema_version"
+        },
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/schema_version"
+        }
+      ]
+    },
+    "source_point_monotonicity": {
+      "operator": "all_equal",
+      "expected": "PASS",
+      "evidence": [
+        {
+          "evidence_ref": "matrix_identity_audit",
+          "field": "/source_point_monotonicity/status"
+        },
+        {
+          "evidence_ref": "formal_experiment",
+          "field": "/source_point_monotonicity"
+        }
+      ]
+    }
+  },
+  "formal_results_modified": false,
+  "formal_100_rerun": false
+}

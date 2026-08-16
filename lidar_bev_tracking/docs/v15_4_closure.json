@@ -1,0 +1,31 @@
+{
+  "schema_version": "15.4-closure-v1",
+  "status": "CLOSED",
+  "canonical_artifacts": {
+    "experiment_result": {
+      "path": "outputs/intensity_filter_ablation/formal/v15_4_formal_experiment.json",
+      "sha256": "1c6f2b783e256df4d9ad4ecbf97acb2adf6113896db55ab612efc841034bca66",
+      "formal_comparison_commit": "00be6dfe68561f4e4d824e9d6cf3fdc5acc0a9e9",
+      "role": "canonical experiment result"
+    },
+    "closure_evidence": {
+      "path": "docs/v15_4_closure_evidence.json",
+      "sha256": "2a2e27eeced937b4f8a4d639883c7f7cb08b8ab8b4d0ffb2599ecb4d2d6227eb",
+      "role": "canonical evidence archive"
+    }
+  },
+  "frozen_conclusion": {
+    "experiment_valid": true,
+    "root_cause_intervention_validated": true,
+    "release_goal_achieved": false,
+    "qualified_release_candidates": [],
+    "selected_release_candidate": null,
+    "safe_configuration": "T0",
+    "safe_intensity_min": 0.38
+  },
+  "product_review": {
+    "status": "PENDING"
+  },
+  "formal_results_modified": false,
+  "formal_100_rerun": false
+}
