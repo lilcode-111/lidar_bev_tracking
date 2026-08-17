@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from bev_tracking.v15_5_seed_support import build_phase0_day1, build_phase0_day2, build_phase0_day3
+from bev_tracking.v15_5_geometry_critical import build_geometry_critical_analysis
 
 
 def build_parser():
@@ -21,6 +22,12 @@ def build_parser():
     day3.add_argument("--day1", default="outputs/seed_support_selectivity/v15_5_phase0_day1.json")
     day3.add_argument("--day2", default="outputs/seed_support_selectivity/v15_5_phase0_day2.json")
     day3.add_argument("--output", default="outputs/seed_support_selectivity/v15_5_phase0_day3.json")
+
+    geometry = commands.add_parser("geometry-critical", help="Analyze frozen far selectivity and marginal geometry gain")
+    geometry.add_argument("--day1", default="outputs/seed_support_selectivity/v15_5_phase0_day1.json")
+    geometry.add_argument("--day2", default="outputs/seed_support_selectivity/v15_5_phase0_day2.json")
+    geometry.add_argument("--day3", default="outputs/seed_support_selectivity/v15_5_phase0_day3.json")
+    geometry.add_argument("--output", default="outputs/seed_support_selectivity/v15_5_phase0_geometry_critical.json")
     return parser
 
 
@@ -58,7 +65,7 @@ def main():
             "formal_pipeline_rerun": result["formal_pipeline_rerun"],
             "saved": args.output,
         }
-    else:
+    elif args.command == "day3":
         result = build_phase0_day3(
             repo_root=root,
             day1_path=args.day1,
@@ -72,6 +79,35 @@ def main():
             "phase0_observation": result["phase0_observation"],
             "gt_oracle_leakage": result["gt_oracle_leakage"],
             "formal_pipeline_rerun": result["formal_pipeline_rerun"],
+            "saved": args.output,
+        }
+    else:
+        result = build_geometry_critical_analysis(
+            repo_root=root,
+            day1_path=args.day1,
+            day2_path=args.day2,
+            day3_path=args.day3,
+            output_path=args.output,
+        )
+        marginal = result["dropped_vehicle_points"]["summary"]
+        summary = {
+            "schema_version": result["schema_version"],
+            "far_H_M_frame_stability": {
+                band: result["far_H_M_frame_stability"][band]["frame_stability"]
+                for band in ("H", "M")
+            },
+            "T2_material_recovery_GT_range_distribution": result["T2_material_recovery_GT_range_distribution"],
+            "far_uniform_vs_far_seed": result["far_uniform_vs_far_seed"]["modes"],
+            "marginal_geometry_gain": {
+                "G_p_distribution": marginal["G_p_distribution"],
+                "runtime_feature_spearman_correlation": marginal["runtime_feature_spearman_correlation"],
+                "offline_oracle_extent_spearman_correlation": marginal["offline_oracle_extent_spearman_correlation"],
+                "top_G_cases_descriptive_only": marginal["top_G_cases_descriptive_only"],
+            },
+            "GT_oracle_leakage": result["GT_oracle_leakage"],
+            "r_seed_search": result["r_seed_search"],
+            "formal_pipeline_rerun": result["formal_pipeline_rerun"],
+            "formal_results_modified": result["formal_results_modified"],
             "saved": args.output,
         }
     print(json.dumps(summary, indent=2, sort_keys=True))
