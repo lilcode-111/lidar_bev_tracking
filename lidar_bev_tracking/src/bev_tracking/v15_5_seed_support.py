@@ -6,13 +6,16 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial import cKDTree
 
-from bev_tracking.kitti import load_kitti_point_cloud, resolve_kitti_paths
+from bev_tracking.kitti import load_kitti_labels, load_kitti_point_cloud, resolve_kitti_calib_path, resolve_kitti_paths
+from bev_tracking.kitti_calib import kitti_labels_to_lidar_boxes, load_kitti_calib
+from bev_tracking.point_retention import build_pca_oracle
 from bev_tracking.report_writer import atomic_write_json
 from bev_tracking.v15_4_materialization import load_json, raw_file_sha256
 
 
 SCHEMA_VERSION = "15.5-phase0-seed-support-day1-v1"
 DAY2_SCHEMA_VERSION = "15.5-phase0-seed-support-day2-v1"
+DAY3_SCHEMA_VERSION = "15.5-phase0-seed-support-day3-v1"
 POINT_IDENTITY = "(frame_id, raw_lidar_point_index)"
 R_SEED_M = 0.60
 VARIANTS = ("T0", "T1", "T2", "T_off")
@@ -36,6 +39,260 @@ REPORT_REGISTRY_IDS = {
 
 class V155SeedSupportError(ValueError):
     pass
+
+
+def build_phase0_day3(
+    *,
+    repo_root=".",
+    day1_path="outputs/seed_support_selectivity/v15_5_phase0_day1.json",
+    day2_path="outputs/seed_support_selectivity/v15_5_phase0_day2.json",
+    output_path="outputs/seed_support_selectivity/v15_5_phase0_day3.json",
+):
+    """Compare delta-22 T0, globally seed-supported H/M, and T2 representations."""
+    root = Path(repo_root)
+    day1_file, day2_file = root / day1_path, root / day2_path
+    day1, day2 = load_json(day1_file), load_json(day2_file)
+    validate_day1_for_day2(day1)
+    validate_day2_for_day3(day1, day2, day1_path, day1_file)
+
+    source_records = {}
+    for variant in ("T0", "T2"):
+        artifact = day1["source"]["formal_reports"][variant]
+        report_path = root / artifact["path"]
+        if raw_file_sha256(report_path) != artifact["sha256"]:
+            raise V155SeedSupportError(f"{variant} formal report hash mismatch")
+        source_records[variant] = load_delta22_source_records(report_path, variant)
+    if set(source_records["T0"]) != set(source_records["T2"]):
+        raise V155SeedSupportError("T0 and T2 delta-22 GT identities differ")
+    if len(source_records["T0"]) != 22:
+        raise V155SeedSupportError("Day3 requires exactly the frozen delta-22 GT identities")
+
+    supported_by_frame, support_cache_identity = load_global_hm_support(day1, root)
+    gt_boxes_by_frame = {}
+    raw_points_by_frame = {}
+    records = []
+    keys = sorted(source_records["T0"])
+    for number, key in enumerate(keys, start=1):
+        frame_id, gt_id = key
+        if frame_id not in raw_points_by_frame:
+            data_root = root / day1["source"]["data_root"]
+            velodyne_path, label_path = resolve_kitti_paths(data_root, frame_id)
+            raw_points_by_frame[frame_id] = load_kitti_point_cloud(velodyne_path)
+            labels = load_kitti_labels(label_path)
+            calib = load_kitti_calib(resolve_kitti_calib_path(data_root, frame_id))
+            gt_boxes_by_frame[frame_id] = {
+                str(box["id"]): box for box in kitti_labels_to_lidar_boxes(labels, calib)
+            }
+        if gt_id not in gt_boxes_by_frame[frame_id]:
+            raise V155SeedSupportError(f"frozen GT identity is missing from KITTI labels: {key}")
+        record = build_delta22_representation_record(
+            key=key,
+            raw_points=raw_points_by_frame[frame_id],
+            gt_box=gt_boxes_by_frame[frame_id][gt_id],
+            t0_record=source_records["T0"][key],
+            t2_record=source_records["T2"][key],
+            globally_supported_hm=supported_by_frame.get(frame_id, np.asarray([], dtype=np.int64)),
+        )
+        records.append(record)
+        print(f"[Day3 {number:02d}/{len(keys):02d}] {frame_id}:{gt_id}")
+
+    summary = summarize_delta22_representations(records)
+    output = {
+        "schema_version": DAY3_SCHEMA_VERSION,
+        "analysis_role": "read_only_delta_22_representation_check",
+        "source": {
+            "day1": {"path": day1_path, "sha256": raw_file_sha256(day1_file)},
+            "day2": {"path": day2_path, "sha256": raw_file_sha256(day2_file)},
+            "formal_comparison_commit": day1["formal_comparison_commit"],
+            "formal_reports": {name: day1["source"]["formal_reports"][name] for name in ("T0", "T2")},
+            "global_H_M_support_cache_identity_sha256": canonical_record_sha256(sorted(support_cache_identity)),
+        },
+        "contracts": {
+            "point_identity": POINT_IDENTITY,
+            "coordinate_row_dedup_used": False,
+            "seed_supported_definition": "T0 + ((H union M) where globally_computed_d_seed <= 0.60m)",
+            "gt_use": "evaluation_only_after_global_seed_support_decision",
+            "gt_oracle_leakage": False,
+            "r_seed_m": R_SEED_M,
+            "r_seed_search_allowed": False,
+            "material_recovery_iou_delta_min": 0.10,
+        },
+        "delta_22": {"count": len(records), "records": records, "summary": summary},
+        "phase0_observation": {
+            "VRR_higher_than_BRR": day2["descriptive_observation"]["VRR_higher_than_BRR"],
+            "seed_supported_T2_material_recovery_retention": summary["recovery_retention_vs_T2"],
+            "decision_status": "EVIDENCE_READY_PENDING_ALGORITHM_REVIEW",
+        },
+        "day3_complete": True,
+        "phase0_complete": True,
+        "gt_oracle_leakage": False,
+        "formal_pipeline_rerun": False,
+        "formal_results_modified": False,
+    }
+    atomic_write_json(root / output_path, output)
+    return output
+
+
+def validate_day2_for_day3(day1, day2, day1_path, day1_file):
+    if day2.get("schema_version") != DAY2_SCHEMA_VERSION or day2.get("day2_complete") is not True:
+        raise V155SeedSupportError("Day2 artifact is not complete")
+    if day2.get("source", {}).get("day1", {}).get("path") != day1_path:
+        raise V155SeedSupportError("Day2 references a different Day1 artifact")
+    if day2["source"]["day1"].get("sha256") != raw_file_sha256(day1_file):
+        raise V155SeedSupportError("Day2 Day1 hash is stale")
+    if day2.get("gt_oracle_leakage") is not False or day2.get("formal_pipeline_rerun") is not False:
+        raise V155SeedSupportError("Day2 violates the read-only Phase-0 contract")
+    if day2.get("source", {}).get("formal_comparison_commit") != day1.get("formal_comparison_commit"):
+        raise V155SeedSupportError("Day1 and Day2 formal commit identities differ")
+
+
+def load_delta22_source_records(report_path, variant):
+    report = load_json(report_path)
+    records = report.get("source_point_identity_records")
+    if not isinstance(records, list):
+        raise V155SeedSupportError(f"{variant} report is missing source point identity records")
+    output = {}
+    for item in records:
+        key = (str(item["frame_id"]).zfill(6), str(item["gt_id"]))
+        if key in output:
+            raise V155SeedSupportError(f"duplicate delta-22 identity in {variant}: {key}")
+        if item.get("point_identity") != "raw_lidar_point_index":
+            raise V155SeedSupportError(f"{variant} delta-22 point identity contract changed")
+        output[key] = item
+    del report
+    gc.collect()
+    return output
+
+
+def load_global_hm_support(day1, root):
+    by_frame = {}
+    identities = []
+    records = [
+        record for record in day1["point_metric_cache"]["records"]
+        if record["category"] == "global" and record["band"] in ("H", "M")
+    ]
+    expected_frames = {str(item["frame_id"]).zfill(6) for item in day1["per_frame_counts"]}
+    if len(records) != len(expected_frames) * 2:
+        raise V155SeedSupportError("global H/M support cache coverage is incomplete")
+    for record in records:
+        metrics = load_verified_metric_cache(root, record)
+        supported = np.asarray(metrics["source_point_indices"][metrics["d_seed"] <= R_SEED_M], dtype=np.int64)
+        frame_id = str(record["frame_id"]).zfill(6)
+        by_frame.setdefault(frame_id, []).append(supported)
+        identities.append([record["path"], record["sha256"]])
+    output = {}
+    for frame_id in expected_frames:
+        arrays = by_frame.get(frame_id, [])
+        values = np.sort(np.concatenate(arrays)) if arrays else np.asarray([], dtype=np.int64)
+        if len(values) != len(np.unique(values)):
+            raise V155SeedSupportError(f"supported H/M point identities overlap: {frame_id}")
+        output[frame_id] = values
+    return output, identities
+
+
+def build_delta22_representation_record(*, key, raw_points, gt_box, t0_record, t2_record, globally_supported_hm):
+    raw_points = np.asarray(raw_points)
+    t0_indices = _validated_stage_indices(t0_record, "intensity_filter", len(raw_points), key)
+    t2_indices = _validated_stage_indices(t2_record, "intensity_filter", len(raw_points), key)
+    missing = np.setdiff1d(t0_indices, t2_indices, assume_unique=True)
+    if len(missing):
+        raise V155SeedSupportError(f"T0 GT points are not a T2 subset: {key}")
+    hm_indices = np.setdiff1d(t2_indices, t0_indices, assume_unique=True)
+    supported_added = np.intersect1d(
+        hm_indices, np.asarray(globally_supported_hm, dtype=np.int64), assume_unique=True
+    )
+    seed_supported_indices = np.union1d(t0_indices, supported_added)
+    if len(seed_supported_indices) != len(t0_indices) + len(supported_added):
+        raise V155SeedSupportError(f"seed-supported source identities overlap T0: {key}")
+
+    oracles = {
+        "T0": build_pca_oracle(raw_points[t0_indices], gt_box),
+        "Seed_Supported": build_pca_oracle(raw_points[seed_supported_indices], gt_box),
+        "T2": build_pca_oracle(raw_points[t2_indices], gt_box),
+    }
+    _validate_recomputed_oracle(oracles["T0"], t0_record.get("post_intensity_diagnostic_pca"), "T0", key)
+    _validate_recomputed_oracle(oracles["T2"], t2_record.get("post_intensity_diagnostic_pca"), "T2", key)
+    seed_delta = oracle_iou_delta(oracles["Seed_Supported"], oracles["T0"])
+    t2_delta = oracle_iou_delta(oracles["T2"], oracles["T0"])
+    return {
+        "frame_id": key[0],
+        "gt_id": key[1],
+        "point_counts": {
+            "T0": int(len(t0_indices)),
+            "H_M_available": int(len(hm_indices)),
+            "H_M_seed_supported": int(len(supported_added)),
+            "Seed_Supported": int(len(seed_supported_indices)),
+            "T2": int(len(t2_indices)),
+        },
+        "representations": oracles,
+        "iou_delta_vs_T0": {"Seed_Supported": seed_delta, "T2": t2_delta},
+        "material_recovery_vs_T0": {
+            "Seed_Supported": seed_delta is not None and seed_delta >= 0.10,
+            "T2": t2_delta is not None and t2_delta >= 0.10,
+        },
+    }
+
+
+def _validated_stage_indices(record, stage, raw_count, key):
+    values = np.asarray(record["stages"][stage]["source_point_indices"], dtype=np.int64)
+    if len(values) != int(record["stages"][stage]["count"]):
+        raise V155SeedSupportError(f"stage point count mismatch: {key}")
+    if len(values) != len(np.unique(values)):
+        raise V155SeedSupportError(f"duplicate source point identity: {key}")
+    values = np.sort(values)
+    if len(values) and (values[0] < 0 or values[-1] >= raw_count):
+        raise V155SeedSupportError(f"source point identity is out of range: {key}")
+    return values
+
+
+def _validate_recomputed_oracle(recomputed, frozen, variant, key, tolerance=1e-8):
+    if not isinstance(frozen, dict):
+        raise V155SeedSupportError(f"{variant} frozen PCA oracle is missing: {key}")
+    if recomputed["status"] != frozen.get("status") or recomputed["num_points"] != int(frozen.get("num_points", -1)):
+        raise V155SeedSupportError(f"{variant} frozen PCA status/count mismatch: {key}")
+    left, right = recomputed["iou"], frozen.get("iou")
+    if (left is None) != (right is None) or (left is not None and not np.isclose(left, right, atol=tolerance, rtol=0.0)):
+        raise V155SeedSupportError(f"{variant} frozen PCA IoU mismatch: {key}")
+
+
+def oracle_iou_delta(later, baseline):
+    if later.get("iou") is None or baseline.get("iou") is None:
+        return None
+    return float(later["iou"] - baseline["iou"])
+
+
+def summarize_delta22_representations(records):
+    modes = ("T0", "Seed_Supported", "T2")
+    summary = {}
+    for mode in modes:
+        oracles = [item["representations"][mode] for item in records]
+        ious = [float(item["iou"]) for item in oracles if item["iou"] is not None]
+        point_counts = [int(item["point_counts"][mode]) for item in records]
+        material = [] if mode == "T0" else [
+            [item["frame_id"], item["gt_id"]]
+            for item in records if item["material_recovery_vs_T0"][mode]
+        ]
+        summary[mode] = {
+            "gt_count": len(records),
+            "valid_pca_count": len(ious),
+            "point_count_median": float(np.median(point_counts)) if point_counts else None,
+            "iou_median": float(np.median(ious)) if ious else None,
+            "iou_ge_0_25_count": sum(value >= 0.25 for value in ious),
+            "iou_ge_0_50_count": sum(value >= 0.50 for value in ious),
+            "material_recovery_vs_T0_count": len(material) if mode != "T0" else None,
+            "material_recovery_vs_T0_identity_list": material if mode != "T0" else None,
+        }
+    seed_keys = {tuple(value) for value in summary["Seed_Supported"]["material_recovery_vs_T0_identity_list"]}
+    t2_keys = {tuple(value) for value in summary["T2"]["material_recovery_vs_T0_identity_list"]}
+    retained = sorted(seed_keys & t2_keys)
+    summary["recovery_retention_vs_T2"] = {
+        "T2_material_recovery_count": len(t2_keys),
+        "Seed_Supported_material_recovery_count": len(seed_keys),
+        "retained_T2_material_recovery_count": len(retained),
+        "retained_T2_material_recovery_identity_list": [list(key) for key in retained],
+        "retention_ratio": len(retained) / len(t2_keys) if t2_keys else None,
+    }
+    return summary
 
 
 def build_phase0_day2(

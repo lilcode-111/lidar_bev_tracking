@@ -2,7 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
-from bev_tracking.v15_5_seed_support import build_phase0_day1, build_phase0_day2
+from bev_tracking.v15_5_seed_support import build_phase0_day1, build_phase0_day2, build_phase0_day3
 
 
 def build_parser():
@@ -16,6 +16,11 @@ def build_parser():
     day2 = commands.add_parser("day2", help="Summarize VRR/BRR, distance strata, and frame stability")
     day2.add_argument("--day1", default="outputs/seed_support_selectivity/v15_5_phase0_day1.json")
     day2.add_argument("--output", default="outputs/seed_support_selectivity/v15_5_phase0_day2.json")
+
+    day3 = commands.add_parser("day3", help="Compare delta-22 T0, seed-supported H/M, and T2 representations")
+    day3.add_argument("--day1", default="outputs/seed_support_selectivity/v15_5_phase0_day1.json")
+    day3.add_argument("--day2", default="outputs/seed_support_selectivity/v15_5_phase0_day2.json")
+    day3.add_argument("--output", default="outputs/seed_support_selectivity/v15_5_phase0_day3.json")
     return parser
 
 
@@ -37,7 +42,7 @@ def main():
             "formal_pipeline_rerun": result["formal_pipeline_rerun"],
             "saved": args.output,
         }
-    else:
+    elif args.command == "day2":
         result = build_phase0_day2(
             repo_root=root,
             day1_path=args.day1,
@@ -49,6 +54,22 @@ def main():
             "primary_H_plus_M": result["primary_H_plus_M"],
             "frame_stability": result["frame_stability"],
             "descriptive_observation": result["descriptive_observation"],
+            "gt_oracle_leakage": result["gt_oracle_leakage"],
+            "formal_pipeline_rerun": result["formal_pipeline_rerun"],
+            "saved": args.output,
+        }
+    else:
+        result = build_phase0_day3(
+            repo_root=root,
+            day1_path=args.day1,
+            day2_path=args.day2,
+            output_path=args.output,
+        )
+        summary = {
+            "schema_version": result["schema_version"],
+            "day3_complete": result["day3_complete"],
+            "delta_22_summary": result["delta_22"]["summary"],
+            "phase0_observation": result["phase0_observation"],
             "gt_oracle_leakage": result["gt_oracle_leakage"],
             "formal_pipeline_rerun": result["formal_pipeline_rerun"],
             "saved": args.output,
