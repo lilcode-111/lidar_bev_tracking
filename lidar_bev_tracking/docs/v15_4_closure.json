@@ -1,6 +1,8 @@
 {
   "schema_version": "15.4-closure-v1",
   "status": "CLOSED",
+  "archive_status": "COMPLETE",
+  "closed_at": "2026-08-17T19:07:20+08:00",
   "canonical_artifacts": {
     "experiment_result": {
       "path": "outputs/intensity_filter_ablation/formal/v15_4_formal_experiment.json",
@@ -14,6 +16,15 @@
       "role": "canonical evidence archive"
     }
   },
+  "identity_history": {
+    "pre_product_signoff": {
+      "path": "docs/v15_4_closure.json",
+      "sha256": "f3a5de743c24dd4e844e0a6fd30edfd8c3c11c03120aa58ba09ee466880f1829",
+      "closure_commit": "2c01c7476f540db6a0914a6f19f3b692f399782d",
+      "product_review_status": "PENDING",
+      "role": "historical identity before product sign-off"
+    }
+  },
   "frozen_conclusion": {
     "experiment_valid": true,
     "root_cause_intervention_validated": true,
@@ -24,7 +35,13 @@
     "safe_intensity_min": 0.38
   },
   "product_review": {
-    "status": "PENDING"
+    "status": "APPROVE_WITH_MINOR_CHANGES",
+    "round": "15.4",
+    "role": "Product Manager",
+    "name": "张经理",
+    "release_candidate": null,
+    "safe_configuration": "T0",
+    "signed_off_at": "2026-08-17T19:07:20+08:00"
   },
   "formal_results_modified": false,
   "formal_100_rerun": false
