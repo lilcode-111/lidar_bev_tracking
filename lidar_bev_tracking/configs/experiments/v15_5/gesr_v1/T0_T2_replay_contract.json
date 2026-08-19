@@ -1,0 +1,54 @@
+{
+  "schema_version": "15.5-gesr-v1-T0-T2-replay-contract-v1",
+  "status": "PRE_REGISTERED",
+  "algorithm_spec_binding": {
+    "hash_mode": "canonical_json_subobject_sha256",
+    "sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda"
+  },
+  "variants": [
+    "T0",
+    "T2"
+  ],
+  "phases": {
+    "Phase2": 25,
+    "Phase3": 100
+  },
+  "reference_source": "frozen 15.4 T0/T2 references",
+  "manifest_identity": {
+    "25_frame_manifest_sha256": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+    "100_frame_manifest_sha256": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19"
+  },
+  "exact_match_fields": [
+    "source point identity",
+    "filtered point sets",
+    "cluster membership/hash",
+    "raw detections",
+    "Car candidates",
+    "NMS outputs",
+    "positive GT identity",
+    "TP/FP/FN",
+    "effective detection",
+    "regression identity"
+  ],
+  "floating_comparison_fields": [
+    "IoU",
+    "PCA box",
+    "Precision",
+    "Recall",
+    "F1"
+  ],
+  "absolute_tolerance": 1e-08,
+  "allowed_differences": [
+    "run_id",
+    "timestamp",
+    "runtime",
+    "artifact path"
+  ],
+  "failure_semantics": {
+    "any_T0_or_T2_replay_failure": "relevant experiment validity FAIL",
+    "Phase2": "Gate0_Phase2 FAIL -> EXPERIMENT_INVALID",
+    "Phase3": "Gate0_Phase3 FAIL -> formal release experiment invalid",
+    "interpret_as_GESR_algorithm_failure": false
+  },
+  "results_observed_at_registration": false
+}

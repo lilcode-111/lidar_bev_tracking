@@ -1,0 +1,193 @@
+{
+  "schema_version": "15.5-gesr-v1-evaluation-spec-v1",
+  "status": "PRE_REGISTERED",
+  "source_precedence": {
+    "runtime_algorithm_conflict": "SOT-1 wins",
+    "evaluation_metric_gate_conflict": "SOT-2 wins",
+    "Gate0_terminal_association_conflict": "SOT-3 supersedes SOT-2"
+  },
+  "algorithm_spec_binding": {
+    "hash_mode": "canonical_json_subobject_sha256",
+    "sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda"
+  },
+  "experiment_structure": {
+    "Phase2": "diagnostic 25-frame comparison",
+    "Phase3": "formal 100-frame comparison only after Phase2 PASS and GateA PASS",
+    "comparison_variants": [
+      "T0",
+      "GESR-v1",
+      "T2"
+    ]
+  },
+  "candidate_evaluation_class": {
+    "identity": "(frame_id, raw_lidar_point_index)",
+    "exactly_one_primary_class": true,
+    "precedence": [
+      "POSITIVE_CAR",
+      "OTHER_ANNOTATED",
+      "ANNOTATION_EXCLUDED_BACKGROUND"
+    ],
+    "definitions": {
+      "POSITIVE_CAR": "inside >=1 positive Car GT oriented 3D box",
+      "OTHER_ANNOTATED": "not POSITIVE_CAR but inside another usable annotation box",
+      "ANNOTATION_EXCLUDED_BACKGROUND": "inside no usable annotation box"
+    },
+    "OTHER_ANNOTATED_in_primary_VRR_BRR": false
+  },
+  "point_selectivity": {
+    "aggregation": "batch_micro",
+    "VRR": "accepted POSITIVE_CAR candidate points / all POSITIVE_CAR candidate points",
+    "BRR": "accepted ANNOTATION_EXCLUDED_BACKGROUND points / all ANNOTATION_EXCLUDED_BACKGROUND candidate points",
+    "primary": {
+      "selectivity_gain": "VRR-BRR"
+    },
+    "diagnostic": {
+      "selectivity_ratio": "VRR/BRR"
+    },
+    "per_frame_diagnostic_required": true,
+    "zero_denominator": {
+      "V_candidate=0": {
+        "VRR": null,
+        "GateB": "not_evaluable"
+      },
+      "B_candidate=0": {
+        "BRR": null,
+        "background": "empty_universe",
+        "selectivity_gain": null
+      }
+    },
+    "fabricated_BRR_zero_forbidden": true
+  },
+  "Gate0": {
+    "formula": "Gate0_Phase2 AND Gate0_Phase3",
+    "Gate0_Phase2": {
+      "non_compensatory": true,
+      "requirements": [
+        "diagnostic_25_manifest_identity PASS",
+        "delta_22_identity PASS",
+        "comparison_commit_identity PASS",
+        "T0_replay_25 PASS",
+        "T2_replay_25 PASS",
+        "candidate_universe_identity PASS",
+        "source_point_identity PASS",
+        "GESR_accepted_subset_of_T2_candidate_universe PASS",
+        "decision_determinism PASS",
+        "component_determinism PASS",
+        "no_GT_runtime_leakage PASS",
+        "algorithm_spec_SHA_binding PASS",
+        "evaluation_spec_SHA_binding PASS",
+        "release_gate_SHA_binding PASS",
+        "new_tunable_parameter_count=0",
+        "no_post_hoc_algorithm_change PASS",
+        "required_Phase2_artifacts_written PASS"
+      ],
+      "initial_status": "not_evaluated",
+      "failure_decision": "EXPERIMENT_INVALID"
+    },
+    "Phase3_authorization": "Gate0_Phase2 PASS AND GateA PASS",
+    "GateA_failure_before_Phase3": "GESR_V1_REJECTED",
+    "Gate0_Phase3": {
+      "requirements": [
+        "formal_100_manifest_identity PASS",
+        "same_comparison_commit_as_Phase2 PASS",
+        "T0_replay_100 PASS",
+        "T2_replay_100 PASS",
+        "GESR_algorithm_spec_SHA_unchanged PASS",
+        "evaluation_spec_SHA_unchanged PASS",
+        "release_gate_SHA_unchanged PASS",
+        "requested=100",
+        "processed=100",
+        "success=100",
+        "metric_valid=100",
+        "partial_success=0",
+        "skipped=0",
+        "failed=0",
+        "dual_IoU_metrics_complete PASS",
+        "formal_result_artifacts_complete PASS",
+        "formal_result_SHA_complete PASS",
+        "formal_provenance_complete PASS",
+        "no_post_hoc_algorithm_change PASS"
+      ],
+      "initial_status": "not_evaluated",
+      "failure_decision": "formal release experiment invalid"
+    },
+    "initial_Final_Gate0": "not_evaluated",
+    "premature_PASS_or_FAIL_for_Phase3_forbidden": true
+  },
+  "material_recovery": "IoU_GESR-IoU_T0 >= +0.10",
+  "material_regression": "IoU_GESR-IoU_T0 <= -0.10",
+  "point_terminal_decision_policy": {
+    "level": "point",
+    "point_terminal_decision_codes": [
+      "ACCEPTED",
+      "GEOMETRY_EXTENSION_INVALID",
+      "INSIDE_CURRENT_EXTENT",
+      "INSUFFICIENT_DIRECT_ANCHORS",
+      "NO_VALID_COMPONENT"
+    ],
+    "terminal_reason_precedence": [
+      "ACCEPTED",
+      "GEOMETRY_EXTENSION_INVALID",
+      "INSIDE_CURRENT_EXTENT",
+      "INSUFFICIENT_DIRECT_ANCHORS",
+      "NO_VALID_COMPONENT"
+    ],
+    "precedence_semantics": "furthest-valid-progress",
+    "exactly_one_terminal_decision_per_candidate": true,
+    "attribution_timing": "after runtime accepted/rejected and selected component are fixed",
+    "attribution_may_change_runtime_result": false,
+    "invariants": [
+      "runtime accepted=true iff terminal=ACCEPTED",
+      "runtime accepted=false iff terminal!=ACCEPTED",
+      "reason attribution ON/OFF preserves accepted point identity set exactly"
+    ]
+  },
+  "association_arbitration": {
+    "level": "candidate x component association",
+    "outcomes": [
+      "SELECTED",
+      "MULTI_COMPONENT_LOST"
+    ],
+    "MULTI_COMPONENT_LOST_is_point_reject_reason": false,
+    "required_fields": [
+      "frame_id",
+      "raw_lidar_point_index",
+      "component_signature",
+      "arbitration_eligible",
+      "arbitration_outcome"
+    ],
+    "eligible": {
+      "outcome": [
+        "SELECTED",
+        "MULTI_COMPONENT_LOST"
+      ]
+    },
+    "not_eligible": {
+      "arbitration_outcome": null,
+      "status": "not_applicable"
+    },
+    "failed_anchor_or_geometry_may_be_MULTI_COMPONENT_LOST": false,
+    "accepted_candidate_invariant": {
+      "eligible_component_count": "k",
+      "SELECTED_count": 1,
+      "MULTI_COMPONENT_LOST_count": "k-1"
+    },
+    "rejected_candidate_SELECTED_count": 0
+  },
+  "arbitration_metrics": {
+    "multi_component_candidate_count": "unique candidate point with candidate_component_count>=2",
+    "conflict_arbitration_count": "unique candidate point with arbitration_eligible_component_count>=2",
+    "lost_association_count": "candidate-component association with MULTI_COMPONENT_LOST"
+  },
+  "stable_component_identity": {
+    "component_signature": "SHA-256(sorted source raw_lidar_point_index list)",
+    "component_id_cross_run_identity": false
+  },
+  "registration_state": {
+    "results_observed_at_registration": false,
+    "Gate0_Phase2": "not_evaluated",
+    "Gate0_Phase3": "not_evaluated",
+    "Final_Gate0": "not_evaluated",
+    "GESR_treatment_metrics_present": false
+  }
+}

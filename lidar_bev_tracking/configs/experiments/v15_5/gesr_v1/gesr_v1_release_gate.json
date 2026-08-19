@@ -1,0 +1,111 @@
+{
+  "schema_version": "15.5-gesr-v1-release-gate-v1",
+  "status": "PRE_REGISTERED",
+  "algorithm_spec_binding": {
+    "hash_mode": "canonical_json_subobject_sha256",
+    "sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda"
+  },
+  "evaluation_spec_binding": {
+    "hash_mode": "raw_file_sha256",
+    "sha256": "f08da389c0d0d0dbc0ee28719cbcd8b0f6d183c120963d4505bb78718eb6ef3e"
+  },
+  "non_compensatory": true,
+  "gates": {
+    "GateA": {
+      "role": "mechanism_geometry_recovery",
+      "delta_22_count": 22,
+      "material_recovery_count_min": 6,
+      "median_iou_gain_vs_T0_min": 0.05,
+      "iou_ge_0_25_count_gain_vs_T0_min": 4,
+      "material_regression_count_max": 2,
+      "material_recovery_frame_count_min": 3,
+      "failure_decision": "GESR_V1_REJECTED"
+    },
+    "GateB": {
+      "role": "selectivity",
+      "geometry_recovery_retention_vs_T2_min": 0.6,
+      "BRR_max": 0.5,
+      "VRR_minus_BRR_min": 0.1,
+      "zero_denominator_semantics": "not_evaluable; never fabricate BRR=0"
+    },
+    "GateC": {
+      "role": "background_FP_cost",
+      "vs_T0": {
+        "FP@0.50": {
+          "absolute_growth_max": 50,
+          "relative_growth_max": 0.1
+        },
+        "FP@0.25": {
+          "absolute_growth_max": 50,
+          "relative_growth_max": 0.1
+        },
+        "effective_Car_detection": {
+          "absolute_growth_max": 75,
+          "relative_growth_max": 0.15
+        },
+        "raw_Car_candidate_before_NMS": {
+          "absolute_growth_max": 100,
+          "relative_growth_max": 0.2
+        },
+        "strict_background_Car_candidate_after_NMS_growth_max": "max(2,ceil(0.10*B0))"
+      },
+      "vs_T2": {
+        "FP@0.50_cost_avoidance_min": 0.5,
+        "strict_background_Car_candidate_cost_avoidance_min": 0.5,
+        "cost_retention": "max(0,X_GESR-X_T0)/(X_T2-X_T0)",
+        "cost_avoidance": "1-min(1,cost_retention)",
+        "when_X_T2_le_X_T0": "not_applicable; PASS fabrication forbidden"
+      }
+    },
+    "GateD": {
+      "role": "downstream_benefit",
+      "TP@0.50_gain_min": 1,
+      "TP@0.25_gain_min": 3,
+      "F1@0.50_regression_allowed": 0.0,
+      "F1@0.25_regression_allowed": 0.0,
+      "gain_spread": "if new TP at an IoU >=2, new TP frame count at that IoU >=2"
+    },
+    "GateE": {
+      "role": "regression_safety",
+      "T0_TP@0.50_to_GESR_FN_max": 0,
+      "T0_TP@0.25_to_GESR_FN_max": 1,
+      "candidate_regression_count_max": "max(1,floor(0.05*T0_candidate_positive_GT_count))",
+      "material_regression_count_max": 2,
+      "unexplained_material_regression_count_max": 0,
+      "unexplained_tp_regression_count_max": 0,
+      "unexplained_candidate_regression_count_max": 0
+    },
+    "GateF": {
+      "role": "decision_mapping",
+      "validity_failure": "EXPERIMENT_INVALID",
+      "RELEASE_CANDIDATE": "A PASS AND B PASS AND C PASS AND D PASS AND E PASS",
+      "MECHANISM_VALIDATED_BUT_NOT_RELEASE_READY": "A PASS AND B PASS AND C PASS AND E PASS AND D FAIL AND downstream_attribution_coverage=100% AND unexplained_downstream_count=0",
+      "GESR_V1_REFINEMENT_REQUIRED": [
+        "A PASS AND B FAIL",
+        "C FAIL",
+        "E FAIL",
+        "D FAIL primarily attributable to GESR structural issue"
+      ],
+      "GESR_V1_REJECTED": "GateA FAIL"
+    }
+  },
+  "success_definitions": {
+    "mechanism_success": "Gate0 PASS AND GateA PASS AND GateB PASS AND unexplained_material_regression_count=0",
+    "GateD_required_for_mechanism_success": false,
+    "release_success": "Gate0 PASS AND GateA PASS AND GateB PASS AND GateC PASS AND GateD PASS AND GateE PASS"
+  },
+  "selection_policy": {
+    "allowed_output": [
+      "GESR-v1",
+      null
+    ],
+    "T2_release_candidate_eligible": false,
+    "selected_release_candidate_when_release_success": "GESR-v1",
+    "selected_release_candidate_otherwise": null
+  },
+  "registration_state": {
+    "results_observed_at_registration": false,
+    "all_gate_results": "not_evaluated",
+    "selected_release_candidate": null
+  }
+}

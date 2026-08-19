@@ -1,0 +1,52 @@
+{
+  "schema_version": "15.5-gesr-v1-no-gt-leakage-test-spec-v1",
+  "status": "PRE_REGISTERED",
+  "algorithm_spec_binding": {
+    "hash_mode": "canonical_json_subobject_sha256",
+    "sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda"
+  },
+  "runtime_core_forbidden_inputs": [
+    "GT",
+    "label",
+    "Evaluation matching",
+    "FailureEvidence",
+    "Oracle"
+  ],
+  "runtime_core_signature_accepts_GT_or_evaluation": false,
+  "metamorphic_cases": [
+    {
+      "id": "A",
+      "input": "same point cloud",
+      "GT": "normal GT"
+    },
+    {
+      "id": "B",
+      "input": "same point cloud",
+      "GT": "no GT"
+    },
+    {
+      "id": "C",
+      "input": "same point cloud",
+      "GT": "GT order changed"
+    },
+    {
+      "id": "D",
+      "input": "same point cloud",
+      "GT": "GT content perturbed"
+    }
+  ],
+  "required_exact_outputs": [
+    "accepted source point identity set",
+    "seed component signatures",
+    "candidate decisions",
+    "selected component signatures",
+    "runtime accepted/rejected result"
+  ],
+  "any_difference": {
+    "no_GT_runtime_leakage": "FAIL",
+    "Gate0_relevant_phase": "FAIL",
+    "experiment_validity": false
+  },
+  "results_observed_at_registration": false,
+  "runtime_implementation_present": false
+}

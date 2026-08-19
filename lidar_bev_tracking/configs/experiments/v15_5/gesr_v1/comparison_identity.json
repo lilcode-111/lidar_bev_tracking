@@ -1,0 +1,189 @@
+{
+  "schema_version": "15.5-gesr-v1-comparison-identity-v1",
+  "status": "PRE_REGISTERED",
+  "registration_role": "final SHA aggregation record",
+  "algorithm_spec_snapshot": {
+    "schema_version": "15.5-gesr-v1-algorithm-spec-snapshot-v1",
+    "status": "FROZEN",
+    "algorithm_name": "Geometry-Extension Selective Retention v1",
+    "short_name": "GESR-v1",
+    "new_tunable_parameter_count": 0,
+    "input_stage": "post-ROI post-z pre-final-intensity-filter point set",
+    "point_identity": "(frame_id, raw_lidar_point_index)",
+    "intensity_split": {
+      "P_seed": "intensity >= 0.38",
+      "P_candidate": "0.15 <= intensity < 0.38",
+      "P_discard": "intensity < 0.15"
+    },
+    "seed_components": {
+      "space": "XY",
+      "connectivity_radius_m": 0.6,
+      "MIN_SEED_COMPONENT_POINTS": 4,
+      "component_signature": "SHA-256(sorted source raw_lidar_point_index list)",
+      "display_component_id_is_cross_run_identity": false
+    },
+    "runtime_geometry": {
+      "method": "seed-only 2D PCA",
+      "center": "mean(seed xy)",
+      "axes": [
+        "major PCA eigenvector",
+        "minor PCA eigenvector"
+      ],
+      "extent": [
+        "u_min",
+        "u_max",
+        "v_min",
+        "v_max"
+      ],
+      "validity": [
+        "|S| >= 4",
+        "lambda1 > numerical_epsilon"
+      ]
+    },
+    "candidate_direct_association": {
+      "space": "XY",
+      "distance_m_max": 0.6,
+      "MIN_DIRECT_SEED_ANCHORS": 2
+    },
+    "extension": {
+      "d_major": "max(u_min-u_p,0,u_p-u_max)",
+      "d_minor": "max(v_min-v_p,0,v_p-v_max)",
+      "extension_score": "sqrt(d_major^2+d_minor^2)",
+      "decision": "extension_score > numerical_epsilon"
+    },
+    "candidate_eligibility": [
+      "VALID_COMPONENT",
+      "direct anchors >= 2",
+      "outside original PCA extent"
+    ],
+    "multi_component_arbitration": {
+      "evaluate": "all eligible components",
+      "association_distance": "mean(nearest direct anchor distance, second-nearest direct anchor distance)",
+      "winner": "minimum association_distance",
+      "tie_break": "minimum deterministic component identity"
+    },
+    "expansion": {
+      "mode": "SINGLE_PASS",
+      "geometry_update": false,
+      "candidate_reanchoring": false,
+      "iterative_expansion": false
+    },
+    "final_point_set": "P_seed UNION P_accept",
+    "frozen_downstream": [
+      "C0 clustering",
+      "classifier",
+      "PCA detection box",
+      "score",
+      "NMS",
+      "Evaluation Policy"
+    ],
+    "candidate_universe": {
+      "stage": "post-ROI post-z",
+      "intensity": "0.15 <= intensity < 0.38",
+      "coordinate_row_identity": false,
+      "coordinate_dedup": false,
+      "invariants": [
+        "GESR accepted source points subset of candidate universe",
+        "T2 recovered candidate set equals complete candidate universe",
+        "GESR representation equals T0 retained points UNION GESR accepted candidate points"
+      ]
+    },
+    "runtime_failure_handling": "frozen terminal policy is attribution-only after accepted/rejected result"
+  },
+  "identity_bindings": {
+    "25_frame_manifest": {
+      "path": "configs/kitti_diagnostic_frames.txt",
+      "hash_mode": "canonical_utf8_lf_sha256",
+      "sha256": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+      "count": 25
+    },
+    "100_frame_manifest": {
+      "path": "configs/kitti_100_frames.txt",
+      "hash_mode": "canonical_utf8_lf_sha256",
+      "sha256": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19",
+      "count": 100
+    },
+    "delta_22": {
+      "source_path": "configs/experiments/v15_4/pre_run_identity.json",
+      "json_pointer": "/delta_22/ordered_identity_list",
+      "hash_mode": "canonical_json_subobject_sha256",
+      "sha256": "69fe13b846023888f454b9c2c18c2df25edfa7128726949938c895922b694d7c",
+      "count": 22
+    },
+    "algorithm_spec": {
+      "source_path": "configs/experiments/v15_5/gesr_v1/comparison_identity.json",
+      "json_pointer": "/algorithm_spec_snapshot",
+      "hash_mode": "canonical_json_subobject_sha256",
+      "sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda"
+    },
+    "terminal_reason_policy": {
+      "source_path": "configs/experiments/v15_5/gesr_v1/gesr_v1_evaluation_spec.json",
+      "json_pointer": "/point_terminal_decision_policy",
+      "hash_mode": "canonical_json_subobject_sha256",
+      "sha256": "94cbdec113f09f473f2c5758f29ae9ef66a9132190e05333b609ec627ea837b9"
+    }
+  },
+  "comparisons": {
+    "T0": {
+      "intensity_min": 0.38,
+      "GESR_enabled": false,
+      "role": "safe baseline",
+      "release_candidate_eligible": false
+    },
+    "GESR-v1": {
+      "base_intensity_min": 0.38,
+      "candidate_intensity": "0.15 <= intensity < 0.38",
+      "GESR_enabled": true,
+      "role": "treatment",
+      "release_candidate_eligible": true
+    },
+    "T2": {
+      "intensity_min": 0.15,
+      "GESR_enabled": false,
+      "role": "uniform recovery reference",
+      "release_candidate_eligible": false
+    }
+  },
+  "release_selector_allowed_output": [
+    "GESR-v1",
+    null
+  ],
+  "artifact_registry": {
+    "evaluation_spec": {
+      "path": "configs/experiments/v15_5/gesr_v1/gesr_v1_evaluation_spec.json",
+      "hash_mode": "raw_file_sha256",
+      "sha256": "f08da389c0d0d0dbc0ee28719cbcd8b0f6d183c120963d4505bb78718eb6ef3e"
+    },
+    "release_gate": {
+      "path": "configs/experiments/v15_5/gesr_v1/gesr_v1_release_gate.json",
+      "hash_mode": "raw_file_sha256",
+      "sha256": "4e89057b6d819174a226e7ac8a3419c8aa28bebb90807680b49d4c1f3483b407"
+    },
+    "T0_T2_replay_contract": {
+      "path": "configs/experiments/v15_5/gesr_v1/T0_T2_replay_contract.json",
+      "hash_mode": "raw_file_sha256",
+      "sha256": "a62b22fe3347745f82f13ee09242e7b35b6e393dd674cee1d4774efcc419ddfa"
+    },
+    "no_gt_leakage_test_spec": {
+      "path": "configs/experiments/v15_5/gesr_v1/no_gt_leakage_test_spec.json",
+      "hash_mode": "raw_file_sha256",
+      "sha256": "6d221d2329585c407b57e1de3bd90878abc26cbdd9a98bccf5ace2021f433f8c"
+    }
+  },
+  "content_sha256": {
+    "algorithm_spec_sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda",
+    "evaluation_spec_sha256": "f08da389c0d0d0dbc0ee28719cbcd8b0f6d183c120963d4505bb78718eb6ef3e",
+    "release_gate_sha256": "4e89057b6d819174a226e7ac8a3419c8aa28bebb90807680b49d4c1f3483b407",
+    "terminal_reason_policy_sha256": "94cbdec113f09f473f2c5758f29ae9ef66a9132190e05333b609ec627ea837b9"
+  },
+  "registration_state": {
+    "results_observed_at_registration": false,
+    "GESR_runtime_implemented": false,
+    "GESR_25_frame_treatment_run": false,
+    "GESR_100_frame_treatment_run": false,
+    "GESR_formal_result_generated": false,
+    "formal_results_modified": false,
+    "registered_treatment_result_artifacts": [],
+    "algorithm_implementation_authorized": false
+  }
+}
