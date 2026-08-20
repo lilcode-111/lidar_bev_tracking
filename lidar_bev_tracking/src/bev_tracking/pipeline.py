@@ -28,6 +28,8 @@ def run_kitti_frame_evaluation(
     auxiliary_iou_thresholds=(0.25,),
     z_min=-0.9,
     intensity_min=0.38,
+    gesr_enabled=False,
+    gesr_reason_attribution=True,
 ):
     frame_id = str(frame_id).zfill(6)
     total_start = perf_counter()
@@ -190,6 +192,9 @@ def run_kitti_frame_evaluation(
             oriented=oriented,
             z_min=z_min,
             intensity_min=intensity_min,
+            gesr_enabled=gesr_enabled,
+            gesr_frame_id=frame_id,
+            gesr_reason_attribution=gesr_reason_attribution,
         )
         detection_time_ms = elapsed_ms(detection_start)
     except Exception as exc:

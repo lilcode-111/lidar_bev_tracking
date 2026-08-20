@@ -226,13 +226,43 @@ def detect_objects_from_points(
     intensity_min=DEFAULT_INTENSITY_MIN,
     return_trace=False,
     clustering_policy=None,
+    gesr_enabled=False,
+    gesr_frame_id=None,
+    gesr_reason_attribution=True,
 ):
-    stages = split_obstacle_filter_stages(
-        points,
-        z_min=z_min,
-        intensity_min=intensity_min,
-    )
-    obstacle_points = stages["intensity_filter"]
+    gesr_result = None
+    obstacle_source_indices = None
+    if not gesr_enabled:
+        stages = split_obstacle_filter_stages(
+            points,
+            z_min=z_min,
+            intensity_min=intensity_min,
+        )
+        obstacle_points = stages["intensity_filter"]
+    else:
+        if float(intensity_min) != DEFAULT_INTENSITY_MIN:
+            raise ValueError("GESR-v1 requires frozen base intensity_min=0.38")
+        if gesr_frame_id is None:
+            raise ValueError("GESR-v1 requires gesr_frame_id for source-point identity")
+        if clustering_policy is not None:
+            raise ValueError("GESR-v1 integration requires frozen C0 clustering")
+        from bev_tracking.gesr_v1 import run_gesr_v1_optimized
+
+        stages, stage_source_indices = split_obstacle_filter_stages_with_indices(
+            points,
+            z_min=z_min,
+            intensity_min=intensity_min,
+        )
+        gesr_result = run_gesr_v1_optimized(
+            gesr_frame_id,
+            stages["z_filter"],
+            stage_source_indices["z_filter"],
+            reason_attribution=gesr_reason_attribution,
+        )
+        obstacle_source_indices = np.asarray(
+            gesr_result.expanded_source_indices, dtype=np.int64
+        )
+        obstacle_points = np.asarray(points)[obstacle_source_indices]
     if clustering_policy is None:
         clusters = euclidean_cluster(obstacle_points, eps=eps, min_points=min_points)
         clustering_mode = "legacy_fixed"
@@ -259,4 +289,21 @@ def detect_objects_from_points(
             "clustering_mode": clustering_mode,
         },
     }
+    if gesr_enabled:
+        from bev_tracking.gesr_v1 import build_gesr_v1_evidence
+
+        trace["point_counts"]["detector_input"] = int(len(obstacle_points))
+        trace["gesr"] = {
+            "enabled": True,
+            "implementation": "optimized_spatial_grid",
+            "frame_id": gesr_result.frame_id,
+            "obstacle_source_indices": obstacle_source_indices.tolist(),
+            "reason_attribution_enabled": bool(gesr_reason_attribution),
+            "runtime_evidence": (
+                build_gesr_v1_evidence(gesr_result)
+                if gesr_reason_attribution
+                else None
+            ),
+            "formal_result": False,
+        }
     return detections, trace

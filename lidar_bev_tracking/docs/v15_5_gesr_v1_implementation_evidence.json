@@ -1,0 +1,110 @@
+{
+  "schema_version": "15.5-gesr-v1-implementation-evidence-v1",
+  "status": "IMPLEMENTATION_COMPLETE_AWAITING_PHASE2_AUTHORIZATION",
+  "algorithm": "Geometry-Extension Selective Retention v1",
+  "implementation_branch": "feature/v15-5-gesr-v1-implementation",
+  "authorization": {
+    "ALGORITHM_IMPLEMENTATION": "AUTHORIZED",
+    "PHASE2_FORMAL_EXECUTION": "NOT_AUTHORIZED",
+    "PHASE3_FORMAL_EXECUTION": "NOT_AUTHORIZED"
+  },
+  "preregistration_binding": {
+    "algorithm_spec_sha256": "d4db7f60aa23d1b855716cbcae40e0d8a055dfe9948e39af97c3939d5d620dda",
+    "evaluation_spec_sha256": "f08da389c0d0d0dbc0ee28719cbcd8b0f6d183c120963d4505bb78718eb6ef3e",
+    "release_gate_sha256": "4e89057b6d819174a226e7ac8a3419c8aa28bebb90807680b49d4c1f3483b407",
+    "terminal_reason_policy_sha256": "94cbdec113f09f473f2c5758f29ae9ef66a9132190e05333b609ec627ea837b9",
+    "25_frame_manifest_sha256": "9450787caf5c060580af219167e526d78ff25f285572bcf9a4d0ecd570a6feba",
+    "100_frame_manifest_sha256": "e24134bdf3208a723f78d99430d1f745a3da2d11833200c192f4edd6507f9f19",
+    "delta_22_identity_sha256": "69fe13b846023888f454b9c2c18c2df25edfa7128726949938c895922b694d7c"
+  },
+  "frozen_runtime_constants": {
+    "SEED_INTENSITY_MIN": 0.38,
+    "CANDIDATE_INTENSITY_MIN": 0.15,
+    "CONNECTIVITY_RADIUS_M": 0.6,
+    "MIN_SEED_COMPONENT_POINTS": 4,
+    "MIN_DIRECT_SEED_ANCHORS": 2,
+    "PCA_EIGENVALUE_EPSILON": 1e-12,
+    "EXTENSION_DISTANCE_EPSILON": 1e-9,
+    "NUMERICAL_DTYPE": "IEEE-754 binary64"
+  },
+  "implementation_status": {
+    "source_point_preserving_input": "COMPLETE",
+    "brute_force_reference": "COMPLETE",
+    "deterministic_seed_component_and_PCA": "COMPLETE",
+    "candidate_association_and_two_anchor_arbitration": "COMPLETE",
+    "immutable_runtime_result": "COMPLETE",
+    "runtime_evidence_builder": "COMPLETE",
+    "deterministic_spatial_grid": "COMPLETE",
+    "reference_optimized_semantic_equivalence": "PASS",
+    "pipeline_integration": "COMPLETE",
+    "baseline_GESR_disabled_non_regression": "PASS",
+    "reason_attribution_ON_OFF_invariant": "PASS",
+    "no_GT_runtime_leakage": "PASS"
+  },
+  "source_artifacts": {
+    "hash_mode": "raw_file_sha256",
+    "files": [
+      {
+        "path": "src/bev_tracking/gesr_v1.py",
+        "sha256": "e04c51162adcb404cc3468b9c68159cf61356c253c586af14e163c11d876ee00"
+      },
+      {
+        "path": "src/bev_tracking/clustering_detector.py",
+        "sha256": "35f32a7a972c91095147dd518864100575acd212bb5c75a26272df3985a83c75"
+      },
+      {
+        "path": "src/bev_tracking/pipeline.py",
+        "sha256": "089825b77de3446d05ba8736467058acae8d098d8057c0a5915a7be909e7f350"
+      },
+      {
+        "path": "tests/test_gesr_v1_day1.py",
+        "sha256": "5b47793e87ce0a203fdbee63f4211eddb314ec10ac486a64d92a7a097bd1cfe6"
+      },
+      {
+        "path": "tests/test_gesr_v1_day2.py",
+        "sha256": "868d7dd5d1f6ac971ff9ef319e2cc91a37f75698d6ef2965700c98c432ca8775"
+      },
+      {
+        "path": "tests/test_gesr_v1_day3.py",
+        "sha256": "e32c6f58030b9949286724744c783191dbfc026acac295feb812d69ebfe1b95f"
+      },
+      {
+        "path": "tests/test_gesr_v1_day4.py",
+        "sha256": "311129e945f2abdadbacd6d1c39cfb2c3c29eaa0007b3d0313b456c0f3433d96"
+      }
+    ]
+  },
+  "test_summary": {
+    "scope": "preregistered unit, invariant, boundary, determinism, No-GT leakage, semantic equivalence and synthetic pipeline tests",
+    "test_count": 50,
+    "pass_count": 50,
+    "fail_count": 0,
+    "breakdown": {
+      "day1_reference_and_numerical": 14,
+      "day2_runtime_evidence": 9,
+      "day3_reference_optimized_equivalence": 12,
+      "day4_pipeline_integration": 9,
+      "preregistration_regression": 6
+    },
+    "formal_dataset_used": false
+  },
+  "equivalence_scope": {
+    "full_runtime_result_equal": true,
+    "source_point_identity_equal": true,
+    "component_membership_equal": true,
+    "component_geometry_equal": true,
+    "candidate_decisions_equal": true,
+    "association_outcomes_equal": true,
+    "accepted_and_expanded_sets_equal": true,
+    "fixed_structured_random_cases": 40
+  },
+  "compliance": {
+    "GT_oracle_leakage": false,
+    "new_tunable_parameter_count": 0,
+    "formal_25_results_observed": false,
+    "formal_100_results_observed": false,
+    "formal_pipeline_rerun": false,
+    "formal_results_modified": false,
+    "Gate_A_to_F_results_observed": false
+  }
+}
