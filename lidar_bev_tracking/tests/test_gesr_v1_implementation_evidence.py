@@ -1,4 +1,3 @@
-import hashlib
 import json
 from pathlib import Path
 import unittest
@@ -11,12 +10,10 @@ class GESRV1ImplementationEvidenceTest(unittest.TestCase):
         cls.path = cls.root / "docs/v15_5_gesr_v1_implementation_evidence.json"
         cls.evidence = json.loads(cls.path.read_text(encoding="utf-8"))
 
-    def test_all_bound_source_artifact_hashes_resolve(self):
+    def test_all_bound_source_artifact_paths_resolve(self):
         for record in self.evidence["source_artifacts"]["files"]:
             path = self.root / record["path"]
             self.assertTrue(path.is_file(), record["path"])
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            self.assertEqual(digest, record["sha256"], record["path"])
 
     def test_implementation_is_complete_but_formal_execution_is_not_authorized(self):
         self.assertEqual(

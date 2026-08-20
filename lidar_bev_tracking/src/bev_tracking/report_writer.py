@@ -297,6 +297,8 @@ def rebuild_batch_after_report_write(batch_result, frame_results, run_id, starte
         nms_iou_threshold=parameters.get("nms_iou_threshold", 0.3),
         eval_iou_threshold=parameters.get("eval_iou_threshold", 0.5),
         auxiliary_iou_thresholds=parameters.get("auxiliary_iou_thresholds", [0.25]),
+        gesr_enabled=parameters.get("gesr_enabled", False),
+        gesr_reason_attribution=parameters.get("gesr_reason_attribution", True),
     )
     rebuilt.schema_version = SCHEMA_VERSION
     rebuilt.run_id = run_id

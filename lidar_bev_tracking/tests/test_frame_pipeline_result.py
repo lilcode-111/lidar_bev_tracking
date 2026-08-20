@@ -74,6 +74,17 @@ class FramePipelineResultTest(unittest.TestCase):
             self.assertIsNotNone(result.total_time_ms)
             self.assertFalse((Path(tmp) / "outputs").exists())
 
+            gesr_result = run_kitti_frame_evaluation(
+                data_root=data_root,
+                frame_id="000000",
+                oriented=True,
+                gesr_enabled=True,
+            )
+            self.assertEqual(gesr_result.status, FrameStatus.SUCCESS)
+            self.assertTrue(gesr_result.artifacts["gesr"]["enabled"])
+            self.assertIsNotNone(gesr_result.artifacts["gesr"]["runtime_evidence"])
+            self.assertIn("obstacle_source_indices", gesr_result.artifacts["gesr"])
+
     def test_pipeline_missing_inputs_are_skipped_not_failed(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = make_mini_kitti(tmp)

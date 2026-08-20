@@ -31,7 +31,13 @@ class BatchReportIntegrationTest(unittest.TestCase):
             config_path.write_text("data:\n  frame_ids:\n    - '000000'\n", encoding="utf-8")
             config = {
                 "data": {"root": "data/kitti", "frame_ids": ["000000"]},
-                "detector": {"eps": 0.6, "min_points": 20, "oriented": True},
+                "detector": {
+                    "eps": 0.6,
+                    "min_points": 20,
+                    "oriented": True,
+                    "gesr_enabled": True,
+                    "gesr_reason_attribution": True,
+                },
                 "nms": {"iou_threshold": 0.3},
                 "evaluation": {"iou_threshold": 0.5, "auxiliary_iou_thresholds": [0.25]},
                 "outputs": {"batch_report_root": str(Path(tmp) / "runs")},
@@ -65,6 +71,8 @@ class BatchReportIntegrationTest(unittest.TestCase):
 
             self.assertEqual(captured["frame_ids"], ["000000"])
             self.assertTrue(captured["oriented"])
+            self.assertTrue(captured["gesr_enabled"])
+            self.assertTrue(captured["gesr_reason_attribution"])
             self.assertEqual(final_batch.frame_counts["metric_valid"], 1)
             self.assertTrue(paths["summary_json"].exists())
             self.assertTrue(paths["frames_csv"].exists())

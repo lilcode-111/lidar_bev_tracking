@@ -185,7 +185,7 @@ def run_kitti_frame_evaluation(
 
     try:
         detection_start = perf_counter()
-        raw_detections = detect_objects_from_points(
+        detector_output = detect_objects_from_points(
             points,
             eps=eps,
             min_points=min_points,
@@ -195,7 +195,13 @@ def run_kitti_frame_evaluation(
             gesr_enabled=gesr_enabled,
             gesr_frame_id=frame_id,
             gesr_reason_attribution=gesr_reason_attribution,
+            return_trace=gesr_enabled,
         )
+        if gesr_enabled:
+            raw_detections, detector_trace = detector_output
+        else:
+            raw_detections = detector_output
+            detector_trace = None
         detection_time_ms = elapsed_ms(detection_start)
     except Exception as exc:
         return failed_frame_result(
@@ -266,6 +272,26 @@ def run_kitti_frame_evaluation(
             total_start=total_start,
         )
 
+    artifacts = {
+        "box_mode": "oriented_pca" if oriented else "axis_aligned",
+        "parameters": {
+            "eps": float(eps),
+            "min_points": int(min_points),
+            "z_min": float(z_min),
+            "intensity_min": float(intensity_min),
+            "nms_iou_threshold": float(nms_iou_threshold),
+            "eval_iou_threshold": float(eval_iou_threshold),
+            "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
+            "gesr_enabled": bool(gesr_enabled),
+            "gesr_reason_attribution": bool(gesr_reason_attribution),
+        },
+        "legacy_evaluation": evaluation,
+    }
+    if detector_trace is not None:
+        gesr_trace = dict(detector_trace["gesr"])
+        gesr_trace.pop("formal_result", None)
+        artifacts["gesr"] = gesr_trace
+
     return FrameResult(
         frame_id=frame_id,
         status=FrameStatus.SUCCESS,
@@ -283,19 +309,7 @@ def run_kitti_frame_evaluation(
         nms_time_ms=nms_time_ms,
         evaluation_time_ms=evaluation_time_ms,
         total_time_ms=elapsed_ms(total_start),
-        artifacts={
-            "box_mode": "oriented_pca" if oriented else "axis_aligned",
-            "parameters": {
-                "eps": float(eps),
-                "min_points": int(min_points),
-                "z_min": float(z_min),
-                "intensity_min": float(intensity_min),
-                "nms_iou_threshold": float(nms_iou_threshold),
-                "eval_iou_threshold": float(eval_iou_threshold),
-                "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
-            },
-            "legacy_evaluation": evaluation,
-        },
+        artifacts=artifacts,
     )
 
 
