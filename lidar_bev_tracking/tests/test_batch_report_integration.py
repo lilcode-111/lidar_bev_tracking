@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from bev_tracking import batch_pipeline
 from bev_tracking.batch_pipeline import build_batch_result, run_kitti_batch_report_from_config
@@ -25,6 +26,21 @@ def success_frame(frame_id):
 
 
 class BatchReportIntegrationTest(unittest.TestCase):
+    def test_batch_loop_reports_each_frame_progress(self):
+        progress = []
+        with patch.object(batch_pipeline, "precheck_kitti_frame_inputs", return_value=None), patch.object(
+            batch_pipeline,
+            "run_kitti_frame_evaluation",
+            side_effect=lambda **kwargs: success_frame(kwargs["frame_id"]),
+        ):
+            results = batch_pipeline.run_kitti_batch_frame_results(
+                frame_ids=["1", "2"],
+                progress_callback=lambda index, total, frame_id: progress.append((index, total, frame_id)),
+            )
+
+        self.assertEqual(progress, [(1, 2, "000001"), (2, 2, "000002")])
+        self.assertEqual([result.frame_id for result in results], ["000001", "000002"])
+
     def test_config_entrypoint_writes_full_batch_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "kitti_eval_batch.yaml"
@@ -43,6 +59,7 @@ class BatchReportIntegrationTest(unittest.TestCase):
                 "outputs": {"batch_report_root": str(Path(tmp) / "runs")},
             }
             captured = {}
+            progress_callback = lambda index, total, frame_id: None
             original = batch_pipeline.run_kitti_batch_result
 
             def fake_batch_result(**kwargs):
@@ -65,6 +82,7 @@ class BatchReportIntegrationTest(unittest.TestCase):
                     config,
                     config_input_path=config_path,
                     command="unit-test command",
+                    progress_callback=progress_callback,
                 )
             finally:
                 batch_pipeline.run_kitti_batch_result = original
@@ -73,6 +91,7 @@ class BatchReportIntegrationTest(unittest.TestCase):
             self.assertTrue(captured["oriented"])
             self.assertTrue(captured["gesr_enabled"])
             self.assertTrue(captured["gesr_reason_attribution"])
+            self.assertIs(captured["progress_callback"], progress_callback)
             self.assertEqual(final_batch.frame_counts["metric_valid"], 1)
             self.assertTrue(paths["summary_json"].exists())
             self.assertTrue(paths["frames_csv"].exists())

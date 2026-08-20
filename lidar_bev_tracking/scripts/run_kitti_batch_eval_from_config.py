@@ -31,8 +31,17 @@ if __name__ == "__main__":
     args = parse_args()
     config = apply_phase2_variant(load_yaml_config(args.config), args.variant)
     command = " ".join(sys.argv)
+    progress_label = args.variant or "BATCH"
     try:
-        batch_result, paths = run_kitti_batch_report_from_config(config, config_input_path=args.config, command=command)
+        batch_result, paths = run_kitti_batch_report_from_config(
+            config,
+            config_input_path=args.config,
+            command=command,
+            progress_callback=lambda index, total, frame_id: print(
+                f"[{progress_label} {index:02d}/{total:02d}] {frame_id}",
+                flush=True,
+            ),
+        )
     except ReportWriteError as exc:
         print(f"report write failed: {exc.error_code.value}", file=sys.stderr)
         print(f"output path: {exc.output_path}", file=sys.stderr)
