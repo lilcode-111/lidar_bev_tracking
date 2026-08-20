@@ -195,8 +195,7 @@ def _squared_xy_distance(left, right):
     return dx * dx + dy * dy
 
 
-def build_seed_components_reference(seed_points, seed_source_indices):
-    """Build deterministic XY connected components with an O(n^2) search."""
+def _sorted_seed_input(seed_points, seed_source_indices):
     points = np.asarray(seed_points, dtype=NUMERICAL_DTYPE)
     indices = np.asarray(seed_source_indices, dtype=np.int64)
     if points.ndim != 2 or points.shape[1] < 2 or len(points) != len(indices):
@@ -204,8 +203,37 @@ def build_seed_components_reference(seed_points, seed_source_indices):
     if len(indices) != len(set(indices.tolist())):
         raise GESRV1Error("seed source indices must be unique")
     order = np.argsort(indices, kind="stable")
-    points = points[order]
-    indices = indices[order]
+    return points[order], indices[order]
+
+
+def _materialize_seed_components(points, indices, memberships):
+    components = []
+    for members in memberships:
+        members = tuple(sorted(members, key=lambda position: int(indices[position])))
+        member_indices = tuple(int(indices[position]) for position in members)
+        member_xy_array = np.asarray(
+            [points[position, :2] for position in members], dtype=NUMERICAL_DTYPE
+        )
+        geometry = deterministic_pca_2d(member_xy_array)
+        if len(members) < MIN_SEED_COMPONENT_POINTS:
+            geometry = replace(geometry, valid=False)
+        components.append(
+            SeedComponent(
+                runtime_id=min(member_indices),
+                signature=component_signature(member_indices),
+                source_indices=member_indices,
+                points_xy=tuple(
+                    (float(point[0]), float(point[1])) for point in member_xy_array
+                ),
+                geometry=geometry,
+            )
+        )
+    return tuple(sorted(components, key=lambda component: component.runtime_id))
+
+
+def build_seed_components_reference(seed_points, seed_source_indices):
+    """Build deterministic XY connected components with an O(n^2) search."""
+    points, indices = _sorted_seed_input(seed_points, seed_source_indices)
     radius2 = CONNECTIVITY_RADIUS_M * CONNECTIVITY_RADIUS_M
     visited = np.zeros(len(points), dtype=bool)
     memberships = []
@@ -228,34 +256,65 @@ def build_seed_components_reference(seed_points, seed_source_indices):
             for other in neighbors:
                 visited[other] = True
                 queue.append(other)
-        memberships.append(tuple(sorted(members, key=lambda position: int(indices[position]))))
-
-    components = []
-    for members in memberships:
-        member_indices = tuple(int(indices[position]) for position in members)
-        member_xy_array = np.asarray([points[position, :2] for position in members], dtype=NUMERICAL_DTYPE)
-        geometry = deterministic_pca_2d(member_xy_array)
-        if len(members) < MIN_SEED_COMPONENT_POINTS:
-            geometry = replace(geometry, valid=False)
-        components.append(
-            SeedComponent(
-                runtime_id=min(member_indices),
-                signature=component_signature(member_indices),
-                source_indices=member_indices,
-                points_xy=tuple((float(point[0]), float(point[1])) for point in member_xy_array),
-                geometry=geometry,
-            )
-        )
-    return tuple(sorted(components, key=lambda component: component.runtime_id))
+        memberships.append(tuple(members))
+    return _materialize_seed_components(points, indices, memberships)
 
 
-def _associate_candidate(point_xy, component):
-    distances = sorted(
-        math.sqrt(_squared_xy_distance(point_xy, anchor))
-        for anchor in component.points_xy
-        if _squared_xy_distance(point_xy, anchor)
-        <= CONNECTIVITY_RADIUS_M * CONNECTIVITY_RADIUS_M
+def _grid_cell(point_xy):
+    """Map XY to a radius-derived cell; this is not a tunable parameter."""
+    return (
+        math.floor(float(point_xy[0]) / CONNECTIVITY_RADIUS_M),
+        math.floor(float(point_xy[1]) / CONNECTIVITY_RADIUS_M),
     )
+
+
+def _build_spatial_grid(points_xy):
+    buckets = {}
+    for position, point in enumerate(points_xy):
+        buckets.setdefault(_grid_cell(point), []).append(position)
+    return {key: tuple(values) for key, values in buckets.items()}
+
+
+def _grid_neighbor_positions(point_xy, points_xy, grid):
+    """Return exact-radius neighbors after a deterministic 3x3 coarse query."""
+    cell_x, cell_y = _grid_cell(point_xy)
+    radius2 = CONNECTIVITY_RADIUS_M * CONNECTIVITY_RADIUS_M
+    candidates = []
+    for grid_x in range(cell_x - 1, cell_x + 2):
+        for grid_y in range(cell_y - 1, cell_y + 2):
+            candidates.extend(grid.get((grid_x, grid_y), ()))
+    return tuple(
+        position
+        for position in sorted(candidates)
+        if _squared_xy_distance(point_xy, points_xy[position]) <= radius2
+    )
+
+
+def build_seed_components_optimized(seed_points, seed_source_indices):
+    """Build seed components with a deterministic exact-filtered spatial grid."""
+    points, indices = _sorted_seed_input(seed_points, seed_source_indices)
+    grid = _build_spatial_grid(points[:, :2])
+    visited = np.zeros(len(points), dtype=bool)
+    memberships = []
+    for start in range(len(points)):
+        if visited[start]:
+            continue
+        visited[start] = True
+        queue = deque((start,))
+        members = []
+        while queue:
+            current = queue.popleft()
+            members.append(current)
+            for other in _grid_neighbor_positions(points[current, :2], points[:, :2], grid):
+                if not visited[other]:
+                    visited[other] = True
+                    queue.append(other)
+        memberships.append(tuple(members))
+    return _materialize_seed_components(points, indices, memberships)
+
+
+def _association_from_distances(point_xy, component, distances):
+    distances = sorted(float(value) for value in distances)
     anchor_count = len(distances)
     mean_distance = float((distances[0] + distances[1]) / 2.0) if anchor_count >= 2 else None
     score = extension_score(component.geometry, point_xy) if component.geometry.valid else None
@@ -274,6 +333,16 @@ def _associate_candidate(point_xy, component):
         extension_score=score,
         eligible=eligible,
     )
+
+
+def _associate_candidate(point_xy, component):
+    distances = (
+        math.sqrt(_squared_xy_distance(point_xy, anchor))
+        for anchor in component.points_xy
+        if _squared_xy_distance(point_xy, anchor)
+        <= CONNECTIVITY_RADIUS_M * CONNECTIVITY_RADIUS_M
+    )
+    return _association_from_distances(point_xy, component, distances)
 
 
 def _attribute_terminal_reason(accepted, associations):
@@ -320,14 +389,42 @@ def _apply_arbitration_outcomes(associations, selected_runtime_id):
     return tuple(output)
 
 
-def run_gesr_v1_reference(
+def _optimized_association_builder(seed_points, seed_indices, components):
+    grid = _build_spatial_grid(seed_points[:, :2])
+    component_by_source_index = {
+        source_index: component.runtime_id
+        for component in components
+        for source_index in component.source_indices
+    }
+    component_by_runtime_id = {component.runtime_id: component for component in components}
+
+    def build(point_xy):
+        distances_by_component = {}
+        for position in _grid_neighbor_positions(point_xy, seed_points[:, :2], grid):
+            source_index = int(seed_indices[position])
+            runtime_id = component_by_source_index[source_index]
+            distance = math.sqrt(_squared_xy_distance(point_xy, seed_points[position, :2]))
+            distances_by_component.setdefault(runtime_id, []).append(distance)
+        return tuple(
+            _association_from_distances(
+                point_xy,
+                component_by_runtime_id[component.runtime_id],
+                distances_by_component.get(component.runtime_id, ()),
+            )
+            for component in components
+        )
+
+    return build
+
+
+def _execute_gesr_v1(
     frame_id,
     points,
     source_indices,
     *,
     reason_attribution=True,
+    optimized=False,
 ):
-    """Run frozen single-pass GESR-v1 with brute-force spatial searches."""
     batch = SourcePointBatch(frame_id=frame_id, points=points, source_indices=source_indices)
     intensities = batch.points[:, 3]
     seed_mask = intensities >= SEED_INTENSITY_MIN
@@ -338,12 +435,23 @@ def run_gesr_v1_reference(
     seed_indices = batch.source_indices[seed_mask]
     candidate_points = batch.points[candidate_mask]
     candidate_indices = batch.source_indices[candidate_mask]
-    components = build_seed_components_reference(seed_points, seed_indices)
+    component_builder = (
+        build_seed_components_optimized if optimized else build_seed_components_reference
+    )
+    components = component_builder(seed_points, seed_indices)
+    if optimized:
+        association_builder = _optimized_association_builder(
+            seed_points, seed_indices, components
+        )
+    else:
+        association_builder = lambda point_xy: tuple(
+            _associate_candidate(point_xy, component) for component in components
+        )
 
     decisions = []
     accepted = []
     for point, source_index in zip(candidate_points, candidate_indices):
-        associations = tuple(_associate_candidate(point[:2], component) for component in components)
+        associations = association_builder(point[:2])
         eligible = [association for association in associations if association.eligible]
         if eligible:
             winner = min(
@@ -391,6 +499,71 @@ def run_gesr_v1_reference(
         components=components,
         candidate_decisions=tuple(decisions),
     )
+
+
+def run_gesr_v1_reference(
+    frame_id,
+    points,
+    source_indices,
+    *,
+    reason_attribution=True,
+):
+    """Run frozen single-pass GESR-v1 with brute-force spatial searches."""
+    return _execute_gesr_v1(
+        frame_id,
+        points,
+        source_indices,
+        reason_attribution=reason_attribution,
+        optimized=False,
+    )
+
+
+def run_gesr_v1_optimized(
+    frame_id,
+    points,
+    source_indices,
+    *,
+    reason_attribution=True,
+):
+    """Run GESR-v1 with a radius-derived grid and exact distance filtering."""
+    return _execute_gesr_v1(
+        frame_id,
+        points,
+        source_indices,
+        reason_attribution=reason_attribution,
+        optimized=True,
+    )
+
+
+def validate_gesr_v1_semantic_equivalence(reference, optimized):
+    """Require full immutable runtime equality, including all evidence fields."""
+    if not isinstance(reference, GESRReferenceResult) or not isinstance(
+        optimized, GESRReferenceResult
+    ):
+        raise GESRV1Error("equivalence inputs must be GESR runtime results")
+    if reference != optimized:
+        mismatches = [
+            name
+            for name in reference.__dataclass_fields__
+            if getattr(reference, name) != getattr(optimized, name)
+        ]
+        raise GESRV1Error(
+            "reference/optimized semantic mismatch: " + ", ".join(mismatches)
+        )
+    return {
+        "status": "PASS",
+        "frame_id": reference.frame_id,
+        "component_count": len(reference.components),
+        "candidate_count": len(reference.candidate_source_indices),
+        "accepted_count": len(reference.accepted_source_indices),
+        "full_runtime_result_equal": True,
+        "source_point_identity_equal": True,
+        "component_membership_equal": True,
+        "component_geometry_equal": True,
+        "candidate_decisions_equal": True,
+        "association_outcomes_equal": True,
+        "accepted_and_expanded_sets_equal": True,
+    }
 
 
 def _geometry_record(geometry):
