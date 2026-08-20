@@ -22,6 +22,14 @@ MIN_DIRECT_SEED_ANCHORS = 2
 PCA_EIGENVALUE_EPSILON = 1.0e-12
 EXTENSION_DISTANCE_EPSILON = 1.0e-9
 NUMERICAL_DTYPE = np.float64
+POINT_TERMINAL_CODES = (
+    "ACCEPTED",
+    "GEOMETRY_EXTENSION_INVALID",
+    "INSIDE_CURRENT_EXTENT",
+    "INSUFFICIENT_DIRECT_ANCHORS",
+    "NO_VALID_COMPONENT",
+)
+ASSOCIATION_OUTCOMES = ("SELECTED", "MULTI_COMPONENT_LOST")
 
 
 class GESRV1Error(ValueError):
@@ -89,10 +97,14 @@ class SeedComponent:
 @dataclass(frozen=True)
 class ComponentAssociation:
     component_runtime_id: int
+    component_signature: str
+    valid_component: bool
     direct_anchor_count: int
     two_anchor_mean_distance: float | None
     extension_score: float | None
     eligible: bool
+    arbitration_outcome: str | None = None
+    arbitration_status: str = "not_applicable"
 
 
 @dataclass(frozen=True)
@@ -100,6 +112,8 @@ class CandidateDecision:
     source_index: int
     accepted: bool
     selected_component_runtime_id: int | None
+    selected_component_signature: str | None
+    point_terminal_decision: str | None
     associations: tuple
 
 
@@ -253,6 +267,8 @@ def _associate_candidate(point_xy, component):
     )
     return ComponentAssociation(
         component_runtime_id=component.runtime_id,
+        component_signature=component.signature,
+        valid_component=component.geometry.valid,
         direct_anchor_count=anchor_count,
         two_anchor_mean_distance=mean_distance,
         extension_score=score,
@@ -260,7 +276,57 @@ def _associate_candidate(point_xy, component):
     )
 
 
-def run_gesr_v1_reference(frame_id, points, source_indices):
+def _attribute_terminal_reason(accepted, associations):
+    """Apply frozen furthest-valid-progress precedence after runtime decision."""
+    if accepted:
+        return "ACCEPTED"
+    directly_related = [item for item in associations if item.direct_anchor_count > 0]
+    if any(not item.valid_component for item in directly_related):
+        return "GEOMETRY_EXTENSION_INVALID"
+    if any(
+        item.valid_component
+        and item.direct_anchor_count >= MIN_DIRECT_SEED_ANCHORS
+        and item.extension_score is not None
+        and not is_geometry_extension(item.extension_score)
+        for item in associations
+    ):
+        return "INSIDE_CURRENT_EXTENT"
+    if directly_related:
+        return "INSUFFICIENT_DIRECT_ANCHORS"
+    return "NO_VALID_COMPONENT"
+
+
+def _apply_arbitration_outcomes(associations, selected_runtime_id):
+    output = []
+    for association in associations:
+        if not association.eligible:
+            output.append(association)
+        elif association.component_runtime_id == selected_runtime_id:
+            output.append(
+                replace(
+                    association,
+                    arbitration_outcome="SELECTED",
+                    arbitration_status="applicable",
+                )
+            )
+        else:
+            output.append(
+                replace(
+                    association,
+                    arbitration_outcome="MULTI_COMPONENT_LOST",
+                    arbitration_status="applicable",
+                )
+            )
+    return tuple(output)
+
+
+def run_gesr_v1_reference(
+    frame_id,
+    points,
+    source_indices,
+    *,
+    reason_attribution=True,
+):
     """Run frozen single-pass GESR-v1 with brute-force spatial searches."""
     batch = SourcePointBatch(frame_id=frame_id, points=points, source_indices=source_indices)
     intensities = batch.points[:, 3]
@@ -288,14 +354,24 @@ def run_gesr_v1_reference(frame_id, points, source_indices):
                 ),
             )
             selected = winner.component_runtime_id
+            selected_signature = winner.component_signature
             accepted.append(int(source_index))
         else:
             selected = None
+            selected_signature = None
+        associations = _apply_arbitration_outcomes(associations, selected)
+        terminal = (
+            _attribute_terminal_reason(bool(eligible), associations)
+            if reason_attribution
+            else None
+        )
         decisions.append(
             CandidateDecision(
                 source_index=int(source_index),
                 accepted=bool(eligible),
                 selected_component_runtime_id=selected,
+                selected_component_signature=selected_signature,
+                point_terminal_decision=terminal,
                 associations=associations,
             )
         )
@@ -315,3 +391,142 @@ def run_gesr_v1_reference(frame_id, points, source_indices):
         components=components,
         candidate_decisions=tuple(decisions),
     )
+
+
+def _geometry_record(geometry):
+    return {
+        "center": list(geometry.center),
+        "major": list(geometry.major),
+        "minor": list(geometry.minor),
+        "lambda1": geometry.lambda1,
+        "lambda2": geometry.lambda2,
+        "extent": {
+            "u_min": geometry.u_min,
+            "u_max": geometry.u_max,
+            "v_min": geometry.v_min,
+            "v_max": geometry.v_max,
+        },
+        "exact_isotropic": geometry.exact_isotropic,
+        "valid": geometry.valid,
+    }
+
+
+def build_gesr_v1_evidence(result):
+    """Build read-only runtime evidence without GT/evaluation inputs."""
+    if not isinstance(result, GESRReferenceResult):
+        raise GESRV1Error("evidence input must be a GESRReferenceResult")
+    if any(item.point_terminal_decision is None for item in result.candidate_decisions):
+        raise GESRV1Error("terminal reason attribution must be enabled for evidence")
+
+    candidate_records = []
+    selected_count = 0
+    lost_count = 0
+    for decision in result.candidate_decisions:
+        associations = []
+        for association in decision.associations:
+            if association.arbitration_outcome == "SELECTED":
+                selected_count += 1
+            elif association.arbitration_outcome == "MULTI_COMPONENT_LOST":
+                lost_count += 1
+            associations.append(
+                {
+                    "frame_id": result.frame_id,
+                    "raw_lidar_point_index": decision.source_index,
+                    "component_runtime_id": association.component_runtime_id,
+                    "component_signature": association.component_signature,
+                    "valid_component": association.valid_component,
+                    "direct_anchor_count": association.direct_anchor_count,
+                    "two_anchor_mean_distance": association.two_anchor_mean_distance,
+                    "extension_score": association.extension_score,
+                    "arbitration_eligible": association.eligible,
+                    "arbitration_outcome": association.arbitration_outcome,
+                    "status": association.arbitration_status,
+                }
+            )
+        candidate_records.append(
+            {
+                "frame_id": result.frame_id,
+                "raw_lidar_point_index": decision.source_index,
+                "accepted": decision.accepted,
+                "point_terminal_decision": decision.point_terminal_decision,
+                "selected_component_runtime_id": decision.selected_component_runtime_id,
+                "selected_component_signature": decision.selected_component_signature,
+                "candidate_component_count": sum(
+                    item.direct_anchor_count > 0 for item in decision.associations
+                ),
+                "arbitration_eligible_component_count": sum(
+                    item.eligible for item in decision.associations
+                ),
+                "associations": associations,
+            }
+        )
+
+    accepted_set = set(result.accepted_source_indices)
+    terminal_accepted_set = {
+        item.source_index
+        for item in result.candidate_decisions
+        if item.point_terminal_decision == "ACCEPTED"
+    }
+    if accepted_set != terminal_accepted_set:
+        raise GESRV1Error("terminal attribution changed runtime accepted identity")
+    if selected_count != len(accepted_set):
+        raise GESRV1Error("accepted candidates must have exactly one SELECTED association")
+    for item in result.candidate_decisions:
+        eligible_count = sum(association.eligible for association in item.associations)
+        item_lost_count = sum(
+            association.arbitration_outcome == "MULTI_COMPONENT_LOST"
+            for association in item.associations
+        )
+        expected_lost = eligible_count - 1 if item.accepted else 0
+        if item_lost_count != expected_lost:
+            raise GESRV1Error("association arbitration invariant failed")
+
+    return {
+        "schema_version": "15.5-gesr-v1-runtime-evidence-v1",
+        "algorithm": "GESR-v1 brute-force reference",
+        "frame_id": result.frame_id,
+        "point_identity": "(frame_id, raw_lidar_point_index)",
+        "point_terminal_decision_codes": list(POINT_TERMINAL_CODES),
+        "association_arbitration_outcomes": list(ASSOCIATION_OUTCOMES),
+        "point_sets": {
+            "seed_source_indices": list(result.seed_source_indices),
+            "candidate_source_indices": list(result.candidate_source_indices),
+            "discarded_source_indices": list(result.discarded_source_indices),
+            "accepted_source_indices": list(result.accepted_source_indices),
+            "expanded_source_indices": list(result.expanded_source_indices),
+        },
+        "components": [
+            {
+                "component_runtime_id": component.runtime_id,
+                "component_signature": component.signature,
+                "source_point_indices": list(component.source_indices),
+                "geometry": _geometry_record(component.geometry),
+            }
+            for component in result.components
+        ],
+        "candidate_decisions": candidate_records,
+        "arbitration_metrics": {
+            "multi_component_candidate_count": sum(
+                record["candidate_component_count"] >= 2
+                for record in candidate_records
+            ),
+            "conflict_arbitration_count": sum(
+                record["arbitration_eligible_component_count"] >= 2
+                for record in candidate_records
+            ),
+            "selected_association_count": selected_count,
+            "lost_association_count": lost_count,
+        },
+        "invariants": {
+            "accepted_iff_terminal_ACCEPTED": True,
+            "exactly_one_SELECTED_per_accepted_candidate": True,
+            "rejected_candidate_SELECTED_count": 0,
+            "accepted_subset_of_candidate_universe": accepted_set.issubset(
+                set(result.candidate_source_indices)
+            ),
+            "expanded_equals_seed_union_accepted": set(result.expanded_source_indices)
+            == set(result.seed_source_indices).union(accepted_set),
+        },
+        "GT_runtime_input": False,
+        "formal_result": False,
+    }

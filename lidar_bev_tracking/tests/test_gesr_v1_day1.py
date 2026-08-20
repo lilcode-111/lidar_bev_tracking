@@ -132,7 +132,10 @@ class GESRV1Day1Test(unittest.TestCase):
         import inspect
 
         parameters = inspect.signature(run_gesr_v1_reference).parameters
-        self.assertEqual(tuple(parameters), ("frame_id", "points", "source_indices"))
+        self.assertEqual(
+            tuple(parameters),
+            ("frame_id", "points", "source_indices", "reason_attribution"),
+        )
 
     def test_frozen_intensity_boundaries_partition_points(self):
         points = np.asarray([
