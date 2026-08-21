@@ -230,15 +230,26 @@ def detect_objects_from_points(
     gesr_frame_id=None,
     gesr_reason_attribution=True,
     gesr_evidence_level="detailed",
+    return_source_indices=False,
 ):
     gesr_result = None
     obstacle_source_indices = None
     if not gesr_enabled:
-        stages = split_obstacle_filter_stages(
-            points,
-            z_min=z_min,
-            intensity_min=intensity_min,
-        )
+        if return_source_indices:
+            stages, stage_source_indices = split_obstacle_filter_stages_with_indices(
+                points,
+                z_min=z_min,
+                intensity_min=intensity_min,
+            )
+            obstacle_source_indices = np.asarray(
+                stage_source_indices["intensity_filter"], dtype=np.int64
+            )
+        else:
+            stages = split_obstacle_filter_stages(
+                points,
+                z_min=z_min,
+                intensity_min=intensity_min,
+            )
         obstacle_points = stages["intensity_filter"]
     else:
         if float(intensity_min) != DEFAULT_INTENSITY_MIN:
@@ -323,4 +334,6 @@ def detect_objects_from_points(
             trace["gesr"]["obstacle_source_index_count"] = int(
                 len(obstacle_source_indices)
             )
+    if return_source_indices:
+        return detections, trace, obstacle_source_indices
     return detections, trace

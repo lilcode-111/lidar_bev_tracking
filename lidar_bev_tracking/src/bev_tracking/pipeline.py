@@ -14,6 +14,8 @@ from bev_tracking.kitti import (
 )
 from bev_tracking.kitti_calib import kitti_labels_to_lidar_boxes, load_kitti_calib
 from bev_tracking.nms import nms_bev
+from bev_tracking.geometry_sanity import points_in_oriented_3d_box
+from bev_tracking.point_retention import build_pca_oracle
 from bev_tracking.result_types import FrameError, FrameMetrics, FrameResult, to_json_compatible
 
 
@@ -31,6 +33,8 @@ def run_kitti_frame_evaluation(
     gesr_enabled=False,
     gesr_reason_attribution=True,
     gesr_evidence_level="detailed",
+    phase2_variant=None,
+    phase2_gate_gt_ids=(),
 ):
     frame_id = str(frame_id).zfill(6)
     total_start = perf_counter()
@@ -186,6 +190,8 @@ def run_kitti_frame_evaluation(
 
     try:
         detection_start = perf_counter()
+        gate_gt_ids = tuple(str(gt_id) for gt_id in phase2_gate_gt_ids)
+        needs_detector_trace = gesr_enabled or bool(gate_gt_ids)
         detector_output = detect_objects_from_points(
             points,
             eps=eps,
@@ -197,13 +203,18 @@ def run_kitti_frame_evaluation(
             gesr_frame_id=frame_id,
             gesr_reason_attribution=gesr_reason_attribution,
             gesr_evidence_level=gesr_evidence_level,
-            return_trace=gesr_enabled,
+            return_trace=needs_detector_trace,
+            return_source_indices=bool(gate_gt_ids),
         )
-        if gesr_enabled:
+        if gate_gt_ids:
+            raw_detections, detector_trace, representation_source_indices = detector_output
+        elif gesr_enabled:
             raw_detections, detector_trace = detector_output
+            representation_source_indices = None
         else:
             raw_detections = detector_output
             detector_trace = None
+            representation_source_indices = None
         detection_time_ms = elapsed_ms(detection_start)
     except Exception as exc:
         return failed_frame_result(
@@ -290,7 +301,20 @@ def run_kitti_frame_evaluation(
         },
         "legacy_evaluation": evaluation,
     }
-    if detector_trace is not None:
+    if gate_gt_ids:
+        artifacts["phase2_delta22_geometry"] = {
+            "schema_version": "15.5-gesr-v1-phase2-delta22-geometry-v1",
+            "variant": str(phase2_variant),
+            "records": build_phase2_delta22_geometry_records(
+                points=points,
+                gt_boxes=gt_boxes,
+                representation_source_indices=representation_source_indices,
+                frame_id=frame_id,
+                variant=phase2_variant,
+                gt_ids=gate_gt_ids,
+            ),
+        }
+    if gesr_enabled and detector_trace is not None:
         gesr_trace = dict(detector_trace["gesr"])
         gesr_trace.pop("formal_result", None)
         artifacts["gesr"] = gesr_trace
@@ -314,6 +338,36 @@ def run_kitti_frame_evaluation(
         total_time_ms=elapsed_ms(total_start),
         artifacts=artifacts,
     )
+
+
+def build_phase2_delta22_geometry_records(
+    *, points, gt_boxes, representation_source_indices, frame_id, variant, gt_ids
+):
+    """Build the minimal frozen O3-like PCA geometry record for selected GTs."""
+    gt_by_id = {str(box["id"]): box for box in gt_boxes}
+    missing = [gt_id for gt_id in gt_ids if gt_id not in gt_by_id]
+    if missing:
+        raise ValueError(f"delta-22 GT identity missing in frame {frame_id}: {missing}")
+
+    representation_points = points[representation_source_indices]
+    records = []
+    for gt_id in gt_ids:
+        gt_box = gt_by_id[gt_id]
+        selected = representation_points[
+            points_in_oriented_3d_box(representation_points, gt_box)
+        ]
+        oracle = build_pca_oracle(selected, gt_box)
+        records.append(
+            {
+                "frame_id": str(frame_id).zfill(6),
+                "gt_id": gt_id,
+                "variant": str(variant),
+                "representation_point_count": int(oracle["num_points"]),
+                "pca_status": oracle["status"],
+                "pca_iou": oracle["iou"],
+            }
+        )
+    return records
 
 
 def run_kitti_bev_evaluation(

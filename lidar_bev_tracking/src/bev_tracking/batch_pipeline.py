@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 from time import perf_counter
 
@@ -91,10 +92,13 @@ def run_kitti_batch_frame_results(
     gesr_evidence_level="detailed",
     progress_callback=None,
     frame_result_callback=None,
+    phase2_variant=None,
+    phase2_delta22_gt_ids_by_frame=None,
 ):
     frame_results = []
     normalized_frame_ids = normalize_frame_ids(frame_ids)
     total_frames = len(normalized_frame_ids)
+    phase2_delta22_gt_ids_by_frame = phase2_delta22_gt_ids_by_frame or {}
     for frame_index, frame_id in enumerate(normalized_frame_ids, start=1):
         if progress_callback is not None:
             progress_callback(frame_index, total_frames, frame_id)
@@ -122,6 +126,8 @@ def run_kitti_batch_frame_results(
                 gesr_enabled=gesr_enabled,
                 gesr_reason_attribution=gesr_reason_attribution,
                 gesr_evidence_level=gesr_evidence_level,
+                phase2_variant=phase2_variant,
+                phase2_gate_gt_ids=phase2_delta22_gt_ids_by_frame.get(frame_id, ()),
             )
         except Exception as exc:
             frame_result = unexpected_failed_frame_result(frame_id, exc)
@@ -150,6 +156,8 @@ def run_kitti_batch_result(
     gesr_evidence_level="detailed",
     progress_callback=None,
     frame_result_callback=None,
+    phase2_variant=None,
+    phase2_delta22_gt_ids_by_frame=None,
 ):
     frame_ids = normalize_frame_ids(frame_ids)
     frame_results = run_kitti_batch_frame_results(
@@ -168,6 +176,8 @@ def run_kitti_batch_result(
         gesr_evidence_level=gesr_evidence_level,
         progress_callback=progress_callback,
         frame_result_callback=frame_result_callback,
+        phase2_variant=phase2_variant,
+        phase2_delta22_gt_ids_by_frame=phase2_delta22_gt_ids_by_frame,
     )
     return build_batch_result(
         frame_results=frame_results,
@@ -464,6 +474,12 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
         started_at=started_at,
         total_start_time=total_start_time,
     )
+    phase2_variant = config.get("phase2", {}).get("variant")
+    delta22_gt_ids_by_frame = (
+        load_phase2_delta22_gt_ids_by_frame()
+        if phase2_variant in {"T0", "T2", "GESR-v1"}
+        else {}
+    )
     batch_result = run_kitti_batch_result(
         data_root=data_config["root"],
         frame_ids=frame_ids,
@@ -483,6 +499,8 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
             frame_result,
             report_context,
         ),
+        phase2_variant=phase2_variant,
+        phase2_delta22_gt_ids_by_frame=delta22_gt_ids_by_frame,
     )
     return finalize_batch_report(
         batch_result,
@@ -498,6 +516,19 @@ def resolve_config_frame_ids(data_config):
 
         return load_diagnostic_frame_ids(manifest_path)
     return data_config.get("frame_ids") or [data_config["frame_id"]]
+
+
+def load_phase2_delta22_gt_ids_by_frame(
+    identity_path="configs/experiments/v15_4/pre_run_identity.json",
+):
+    payload = json.loads(Path(identity_path).read_text(encoding="utf-8"))
+    identities = payload["delta_22"]["ordered_identity_list"]
+    if len(identities) != 22:
+        raise ValueError("frozen delta-22 identity list must contain exactly 22 GTs")
+    by_frame = {}
+    for frame_id, gt_id in identities:
+        by_frame.setdefault(str(frame_id).zfill(6), []).append(str(gt_id))
+    return {frame_id: tuple(gt_ids) for frame_id, gt_ids in by_frame.items()}
 
 
 def format_batch_report_summary(batch_result, paths):

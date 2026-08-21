@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -105,6 +106,22 @@ class FramePipelineResultTest(unittest.TestCase):
                 "candidate_decisions",
                 compact_gesr["runtime_evidence"],
             )
+
+            gate_result = run_kitti_frame_evaluation(
+                data_root=data_root,
+                frame_id="000000",
+                oriented=True,
+                phase2_variant="T0",
+                phase2_gate_gt_ids=("gt_1",),
+            )
+            geometry = gate_result.artifacts["phase2_delta22_geometry"]
+            self.assertEqual(geometry["variant"], "T0")
+            self.assertEqual(len(geometry["records"]), 1)
+            self.assertEqual(geometry["records"][0]["gt_id"], "gt_1")
+            self.assertGreaterEqual(
+                geometry["records"][0]["representation_point_count"], 0
+            )
+            self.assertNotIn("source_indices", json.dumps(geometry))
 
     def test_pipeline_missing_inputs_are_skipped_not_failed(self):
         with tempfile.TemporaryDirectory() as tmp:
