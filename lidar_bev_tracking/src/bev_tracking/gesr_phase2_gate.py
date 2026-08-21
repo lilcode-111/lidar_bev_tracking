@@ -38,7 +38,7 @@ def load_run(run_dir, expected_variant):
     summary = load_json(run_dir / "summary.json")
     config = load_json(run_dir / "config_effective.json")
     records = {}
-    invariant_values = []
+    invariant_items = []
     for frame_path in sorted((run_dir / "frames").glob("*.json")):
         frame = load_json(frame_path)
         geometry = frame.get("artifacts", {}).get("phase2_delta22_geometry")
@@ -53,13 +53,13 @@ def load_run(run_dir, expected_variant):
         if expected_variant == "GESR-v1":
             runtime = frame.get("artifacts", {}).get("gesr", {}).get("runtime_evidence")
             if runtime is not None:
-                invariant_values.extend(runtime.get("invariants", {}).values())
+                invariant_items.extend(runtime.get("invariants", {}).items())
     return {
         "run_dir": str(run_dir),
         "summary": summary,
         "config": config,
         "records": records,
-        "gesr_invariants": invariant_values,
+        "gesr_invariants": invariant_items,
     }
 
 
@@ -112,7 +112,10 @@ def build_gate0(runs, contract):
             set(run["records"]) == expected_identities for run in runs.values()
         ),
         "source_point_identity_runtime_invariants": bool(runs["GESR-v1"]["gesr_invariants"])
-        and all(value is True for value in runs["GESR-v1"]["gesr_invariants"]),
+        and all(
+            value == 0 if name == "rejected_candidate_SELECTED_count" else value is True
+            for name, value in runs["GESR-v1"]["gesr_invariants"]
+        ),
     }
     return {
         "result": "PASS" if all(checks.values()) else "FAIL",

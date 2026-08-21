@@ -104,7 +104,12 @@ class GESRPhase2GateTest(unittest.TestCase):
                     }
                     if variant == "GESR-v1":
                         artifacts["gesr"] = {
-                            "runtime_evidence": {"invariants": {"identity": True}}
+                            "runtime_evidence": {
+                                "invariants": {
+                                    "identity": True,
+                                    "rejected_candidate_SELECTED_count": 0,
+                                }
+                            }
                         }
                     (frames_dir / f"{frame_id}.json").write_text(
                         json.dumps({"artifacts": artifacts}), encoding="utf-8"
