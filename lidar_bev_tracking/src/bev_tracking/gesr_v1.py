@@ -5,7 +5,7 @@ point.  The reference implementation intentionally uses quadratic XY searches;
 an optimized spatial index must later prove exact semantic equivalence to it.
 """
 
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -389,7 +389,7 @@ def _apply_arbitration_outcomes(associations, selected_runtime_id):
     return tuple(output)
 
 
-def _optimized_association_builder(seed_points, seed_indices, components):
+def _optimized_association_builder(seed_points, seed_indices, components, sparse=False):
     grid = _build_spatial_grid(seed_points[:, :2])
     component_by_source_index = {
         source_index: component.runtime_id
@@ -405,13 +405,18 @@ def _optimized_association_builder(seed_points, seed_indices, components):
             runtime_id = component_by_source_index[source_index]
             distance = math.sqrt(_squared_xy_distance(point_xy, seed_points[position, :2]))
             distances_by_component.setdefault(runtime_id, []).append(distance)
+        component_ids = (
+            sorted(distances_by_component)
+            if sparse
+            else [component.runtime_id for component in components]
+        )
         return tuple(
             _association_from_distances(
                 point_xy,
-                component_by_runtime_id[component.runtime_id],
-                distances_by_component.get(component.runtime_id, ()),
+                component_by_runtime_id[runtime_id],
+                distances_by_component.get(runtime_id, ()),
             )
-            for component in components
+            for runtime_id in component_ids
         )
 
     return build
@@ -424,6 +429,7 @@ def _execute_gesr_v1(
     *,
     reason_attribution=True,
     optimized=False,
+    compact_evidence=False,
 ):
     batch = SourcePointBatch(frame_id=frame_id, points=points, source_indices=source_indices)
     intensities = batch.points[:, 3]
@@ -441,7 +447,10 @@ def _execute_gesr_v1(
     components = component_builder(seed_points, seed_indices)
     if optimized:
         association_builder = _optimized_association_builder(
-            seed_points, seed_indices, components
+            seed_points,
+            seed_indices,
+            components,
+            sparse=compact_evidence,
         )
     else:
         association_builder = lambda point_xy: tuple(
@@ -524,6 +533,7 @@ def run_gesr_v1_optimized(
     source_indices,
     *,
     reason_attribution=True,
+    compact_evidence=False,
 ):
     """Run GESR-v1 with a radius-derived grid and exact distance filtering."""
     return _execute_gesr_v1(
@@ -532,6 +542,7 @@ def run_gesr_v1_optimized(
         source_indices,
         reason_attribution=reason_attribution,
         optimized=True,
+        compact_evidence=compact_evidence,
     )
 
 
@@ -687,6 +698,90 @@ def build_gesr_v1_evidence(result):
                 record["arbitration_eligible_component_count"] >= 2
                 for record in candidate_records
             ),
+            "selected_association_count": selected_count,
+            "lost_association_count": lost_count,
+        },
+        "invariants": {
+            "accepted_iff_terminal_ACCEPTED": True,
+            "exactly_one_SELECTED_per_accepted_candidate": True,
+            "rejected_candidate_SELECTED_count": 0,
+            "accepted_subset_of_candidate_universe": accepted_set.issubset(
+                set(result.candidate_source_indices)
+            ),
+            "expanded_equals_seed_union_accepted": set(result.expanded_source_indices)
+            == set(result.seed_source_indices).union(accepted_set),
+        },
+        "GT_runtime_input": False,
+        "formal_result": False,
+    }
+
+
+def build_gesr_v1_compact_evidence(result):
+    """Build bounded batch evidence without point/component cross-products."""
+    if not isinstance(result, GESRReferenceResult):
+        raise GESRV1Error("evidence input must be a GESRReferenceResult")
+    if any(item.point_terminal_decision is None for item in result.candidate_decisions):
+        raise GESRV1Error("terminal reason attribution must be enabled for evidence")
+
+    terminal_counts = Counter(
+        item.point_terminal_decision for item in result.candidate_decisions
+    )
+    selected_count = 0
+    lost_count = 0
+    related_association_count = 0
+    multi_component_candidate_count = 0
+    conflict_arbitration_count = 0
+    for decision in result.candidate_decisions:
+        related = [item for item in decision.associations if item.direct_anchor_count > 0]
+        eligible_count = sum(item.eligible for item in related)
+        decision_selected = sum(
+            item.arbitration_outcome == "SELECTED" for item in related
+        )
+        decision_lost = sum(
+            item.arbitration_outcome == "MULTI_COMPONENT_LOST" for item in related
+        )
+        if decision_selected != int(decision.accepted):
+            raise GESRV1Error("accepted candidates must have exactly one SELECTED association")
+        if decision_lost != (eligible_count - 1 if decision.accepted else 0):
+            raise GESRV1Error("association arbitration invariant failed")
+        selected_count += decision_selected
+        lost_count += decision_lost
+        related_association_count += len(related)
+        multi_component_candidate_count += int(len(related) >= 2)
+        conflict_arbitration_count += int(eligible_count >= 2)
+
+    accepted_set = set(result.accepted_source_indices)
+    terminal_accepted_set = {
+        item.source_index
+        for item in result.candidate_decisions
+        if item.point_terminal_decision == "ACCEPTED"
+    }
+    if accepted_set != terminal_accepted_set:
+        raise GESRV1Error("terminal attribution changed runtime accepted identity")
+
+    return {
+        "schema_version": "15.5-gesr-v1-runtime-evidence-compact-v1",
+        "algorithm": "GESR-v1",
+        "evidence_level": "compact",
+        "frame_id": result.frame_id,
+        "point_counts": {
+            "seed": len(result.seed_source_indices),
+            "candidate": len(result.candidate_source_indices),
+            "discarded": len(result.discarded_source_indices),
+            "accepted": len(result.accepted_source_indices),
+            "expanded": len(result.expanded_source_indices),
+        },
+        "component_counts": {
+            "total": len(result.components),
+            "valid": sum(component.geometry.valid for component in result.components),
+        },
+        "terminal_reason_counts": {
+            code: int(terminal_counts.get(code, 0)) for code in POINT_TERMINAL_CODES
+        },
+        "arbitration_metrics": {
+            "related_association_count": related_association_count,
+            "multi_component_candidate_count": multi_component_candidate_count,
+            "conflict_arbitration_count": conflict_arbitration_count,
             "selected_association_count": selected_count,
             "lost_association_count": lost_count,
         },

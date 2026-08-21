@@ -24,7 +24,9 @@ def run_kitti_batch_evaluation(
     intensity_min=0.38,
     gesr_enabled=False,
     gesr_reason_attribution=True,
+    gesr_evidence_level="detailed",
     progress_callback=None,
+    frame_result_callback=None,
 ):
     frame_ids = normalize_frame_ids(frame_ids)
     frame_results = run_kitti_batch_frame_results(
@@ -40,7 +42,9 @@ def run_kitti_batch_evaluation(
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
         gesr_enabled=gesr_enabled,
         gesr_reason_attribution=gesr_reason_attribution,
+        gesr_evidence_level=gesr_evidence_level,
         progress_callback=progress_callback,
+        frame_result_callback=frame_result_callback,
     )
     frame_reports = []
 
@@ -84,7 +88,9 @@ def run_kitti_batch_frame_results(
     intensity_min=0.38,
     gesr_enabled=False,
     gesr_reason_attribution=True,
+    gesr_evidence_level="detailed",
     progress_callback=None,
+    frame_result_callback=None,
 ):
     frame_results = []
     normalized_frame_ids = normalize_frame_ids(frame_ids)
@@ -94,28 +100,36 @@ def run_kitti_batch_frame_results(
             progress_callback(frame_index, total_frames, frame_id)
         skipped = precheck_kitti_frame_inputs(data_root, frame_id)
         if skipped is not None:
-            frame_results.append(skipped)
+            frame_results.append(
+                frame_result_callback(skipped)
+                if frame_result_callback is not None
+                else skipped
+            )
             continue
 
         try:
-            frame_results.append(
-                run_kitti_frame_evaluation(
-                    data_root=data_root,
-                    frame_id=frame_id,
-                    eps=eps,
-                    min_points=min_points,
-                    oriented=oriented,
-                    z_min=z_min,
-                    intensity_min=intensity_min,
-                    nms_iou_threshold=nms_iou_threshold,
-                    eval_iou_threshold=eval_iou_threshold,
-                    auxiliary_iou_thresholds=auxiliary_iou_thresholds,
-                    gesr_enabled=gesr_enabled,
-                    gesr_reason_attribution=gesr_reason_attribution,
-                )
+            frame_result = run_kitti_frame_evaluation(
+                data_root=data_root,
+                frame_id=frame_id,
+                eps=eps,
+                min_points=min_points,
+                oriented=oriented,
+                z_min=z_min,
+                intensity_min=intensity_min,
+                nms_iou_threshold=nms_iou_threshold,
+                eval_iou_threshold=eval_iou_threshold,
+                auxiliary_iou_thresholds=auxiliary_iou_thresholds,
+                gesr_enabled=gesr_enabled,
+                gesr_reason_attribution=gesr_reason_attribution,
+                gesr_evidence_level=gesr_evidence_level,
             )
         except Exception as exc:
-            frame_results.append(unexpected_failed_frame_result(frame_id, exc))
+            frame_result = unexpected_failed_frame_result(frame_id, exc)
+        frame_results.append(
+            frame_result_callback(frame_result)
+            if frame_result_callback is not None
+            else frame_result
+        )
 
     return frame_results
 
@@ -133,7 +147,9 @@ def run_kitti_batch_result(
     intensity_min=0.38,
     gesr_enabled=False,
     gesr_reason_attribution=True,
+    gesr_evidence_level="detailed",
     progress_callback=None,
+    frame_result_callback=None,
 ):
     frame_ids = normalize_frame_ids(frame_ids)
     frame_results = run_kitti_batch_frame_results(
@@ -149,7 +165,9 @@ def run_kitti_batch_result(
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
         gesr_enabled=gesr_enabled,
         gesr_reason_attribution=gesr_reason_attribution,
+        gesr_evidence_level=gesr_evidence_level,
         progress_callback=progress_callback,
+        frame_result_callback=frame_result_callback,
     )
     return build_batch_result(
         frame_results=frame_results,
@@ -165,6 +183,7 @@ def run_kitti_batch_result(
         auxiliary_iou_thresholds=auxiliary_iou_thresholds,
         gesr_enabled=gesr_enabled,
         gesr_reason_attribution=gesr_reason_attribution,
+        gesr_evidence_level=gesr_evidence_level,
     )
 
 
@@ -182,6 +201,7 @@ def build_batch_result(
     intensity_min=0.38,
     gesr_enabled=False,
     gesr_reason_attribution=True,
+    gesr_evidence_level="detailed",
 ):
     frame_ids = normalize_frame_ids(frame_ids) if frame_ids is not None else [result.frame_id for result in frame_results]
     iou_keys = metric_keys(eval_iou_threshold, auxiliary_iou_thresholds)
@@ -209,6 +229,7 @@ def build_batch_result(
                 "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
                 "gesr_enabled": bool(gesr_enabled),
                 "gesr_reason_attribution": bool(gesr_reason_attribution),
+                "gesr_evidence_level": str(gesr_evidence_level),
             },
         },
         error_counts=error_counts,
@@ -417,6 +438,7 @@ def run_kitti_batch_evaluation_from_config(config, progress_callback=None):
         report_dir=config["outputs"]["report_dir"],
         gesr_enabled=config["detector"].get("gesr_enabled", False),
         gesr_reason_attribution=config["detector"].get("gesr_reason_attribution", True),
+        gesr_evidence_level=config["detector"].get("gesr_evidence_level", "detailed"),
         progress_callback=progress_callback,
     )
 
@@ -425,10 +447,23 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
     data_config = config["data"]
     frame_ids = resolve_config_frame_ids(data_config)
     output_root = config["outputs"].get("batch_report_root", "outputs/kitti_batch_eval")
-    from bev_tracking.report_writer import utc_now_iso
+    from bev_tracking.report_writer import (
+        finalize_batch_report,
+        prepare_batch_report,
+        utc_now_iso,
+        write_streamed_frame_report,
+    )
 
     started_at = utc_now_iso()
     total_start_time = perf_counter()
+    report_context = prepare_batch_report(
+        output_root=output_root,
+        config_input_path=config_input_path,
+        config_effective=config,
+        task_name="kitti_car_batch",
+        started_at=started_at,
+        total_start_time=total_start_time,
+    )
     batch_result = run_kitti_batch_result(
         data_root=data_config["root"],
         frame_ids=frame_ids,
@@ -442,20 +477,17 @@ def run_kitti_batch_report_from_config(config, config_input_path=None, command=N
         auxiliary_iou_thresholds=config["evaluation"].get("auxiliary_iou_thresholds", [0.25]),
         gesr_enabled=config["detector"].get("gesr_enabled", False),
         gesr_reason_attribution=config["detector"].get("gesr_reason_attribution", True),
+        gesr_evidence_level=config["detector"].get("gesr_evidence_level", "detailed"),
         progress_callback=progress_callback,
+        frame_result_callback=lambda frame_result: write_streamed_frame_report(
+            frame_result,
+            report_context,
+        ),
     )
-
-    from bev_tracking.report_writer import write_batch_report
-
-    return write_batch_report(
+    return finalize_batch_report(
         batch_result,
-        output_root=output_root,
-        config_input_path=config_input_path,
-        config_effective=config,
-        task_name="kitti_car_batch",
+        report_context,
         command=command,
-        started_at=started_at,
-        total_start_time=total_start_time,
     )
 
 

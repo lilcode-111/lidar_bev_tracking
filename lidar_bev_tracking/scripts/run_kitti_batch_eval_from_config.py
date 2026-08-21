@@ -22,6 +22,7 @@ def apply_phase2_variant(config, variant):
     detector["intensity_min"] = 0.15 if variant == "T2" else 0.38
     detector["gesr_enabled"] = variant == "GESR-v1"
     detector["gesr_reason_attribution"] = True
+    detector["gesr_evidence_level"] = "compact"
     effective["phase2"] = {"variant": variant}
     effective.setdefault("outputs", {})["batch_report_root"] = f"outputs/gesr_v1/phase2/{variant}"
     return effective

@@ -30,6 +30,7 @@ def run_kitti_frame_evaluation(
     intensity_min=0.38,
     gesr_enabled=False,
     gesr_reason_attribution=True,
+    gesr_evidence_level="detailed",
 ):
     frame_id = str(frame_id).zfill(6)
     total_start = perf_counter()
@@ -195,6 +196,7 @@ def run_kitti_frame_evaluation(
             gesr_enabled=gesr_enabled,
             gesr_frame_id=frame_id,
             gesr_reason_attribution=gesr_reason_attribution,
+            gesr_evidence_level=gesr_evidence_level,
             return_trace=gesr_enabled,
         )
         if gesr_enabled:
@@ -284,6 +286,7 @@ def run_kitti_frame_evaluation(
             "auxiliary_iou_thresholds": [float(threshold) for threshold in auxiliary_iou_thresholds],
             "gesr_enabled": bool(gesr_enabled),
             "gesr_reason_attribution": bool(gesr_reason_attribution),
+            "gesr_evidence_level": str(gesr_evidence_level),
         },
         "legacy_evaluation": evaluation,
     }

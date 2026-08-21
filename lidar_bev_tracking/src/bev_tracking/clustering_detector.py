@@ -229,6 +229,7 @@ def detect_objects_from_points(
     gesr_enabled=False,
     gesr_frame_id=None,
     gesr_reason_attribution=True,
+    gesr_evidence_level="detailed",
 ):
     gesr_result = None
     obstacle_source_indices = None
@@ -246,6 +247,8 @@ def detect_objects_from_points(
             raise ValueError("GESR-v1 requires gesr_frame_id for source-point identity")
         if clustering_policy is not None:
             raise ValueError("GESR-v1 integration requires frozen C0 clustering")
+        if gesr_evidence_level not in {"detailed", "compact"}:
+            raise ValueError("gesr_evidence_level must be detailed or compact")
         from bev_tracking.gesr_v1 import run_gesr_v1_optimized
 
         stages, stage_source_indices = split_obstacle_filter_stages_with_indices(
@@ -258,6 +261,7 @@ def detect_objects_from_points(
             stages["z_filter"],
             stage_source_indices["z_filter"],
             reason_attribution=gesr_reason_attribution,
+            compact_evidence=gesr_evidence_level == "compact",
         )
         obstacle_source_indices = np.asarray(
             gesr_result.expanded_source_indices, dtype=np.int64
@@ -290,20 +294,33 @@ def detect_objects_from_points(
         },
     }
     if gesr_enabled:
-        from bev_tracking.gesr_v1 import build_gesr_v1_evidence
+        from bev_tracking.gesr_v1 import (
+            build_gesr_v1_compact_evidence,
+            build_gesr_v1_evidence,
+        )
 
         trace["point_counts"]["detector_input"] = int(len(obstacle_points))
         trace["gesr"] = {
             "enabled": True,
             "implementation": "optimized_spatial_grid",
             "frame_id": gesr_result.frame_id,
-            "obstacle_source_indices": obstacle_source_indices.tolist(),
+            "evidence_level": gesr_evidence_level,
             "reason_attribution_enabled": bool(gesr_reason_attribution),
             "runtime_evidence": (
-                build_gesr_v1_evidence(gesr_result)
+                (
+                    build_gesr_v1_compact_evidence(gesr_result)
+                    if gesr_evidence_level == "compact"
+                    else build_gesr_v1_evidence(gesr_result)
+                )
                 if gesr_reason_attribution
                 else None
             ),
             "formal_result": False,
         }
+        if gesr_evidence_level == "detailed":
+            trace["gesr"]["obstacle_source_indices"] = obstacle_source_indices.tolist()
+        else:
+            trace["gesr"]["obstacle_source_index_count"] = int(
+                len(obstacle_source_indices)
+            )
     return detections, trace

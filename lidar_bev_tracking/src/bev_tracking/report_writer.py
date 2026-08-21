@@ -89,6 +89,35 @@ def write_batch_report(
     finished_at=None,
     total_start_time=None,
 ):
+    context = prepare_batch_report(
+        output_root=output_root,
+        config_input_path=config_input_path,
+        config_effective=config_effective,
+        task_name=task_name,
+        started_at=started_at,
+        total_start_time=total_start_time,
+    )
+    updated_frames = [
+        write_frame_report(frame_result, context["paths"]["per_frame_report_dir"])
+        for frame_result in batch_result.frame_results
+    ]
+    batch_result.frame_results = updated_frames
+    return finalize_batch_report(
+        batch_result,
+        context,
+        command=command,
+        finished_at=finished_at,
+    )
+
+
+def prepare_batch_report(
+    output_root="outputs/kitti_batch_eval",
+    config_input_path=None,
+    config_effective=None,
+    task_name="kitti_car_batch",
+    started_at=None,
+    total_start_time=None,
+):
     config_hash = compute_config_hash(config_effective or {})
     run_id = make_run_id(task_name, config_hash)
     run_dir = create_run_dir(output_root, run_id)
@@ -100,20 +129,42 @@ def write_batch_report(
     write_required_json(paths["config_effective"], config_effective or {}, ErrorCode.CONFIG_SNAPSHOT_WRITE_FAILED)
     git_metadata = capture_git_metadata()
     write_required_json(paths["git_metadata"], git_metadata, ErrorCode.GIT_METADATA_UNAVAILABLE)
+    return {
+        "config_hash": config_hash,
+        "run_id": run_id,
+        "paths": paths,
+        "started_at": started_at,
+        "total_start_time": total_start_time,
+        "git_metadata": git_metadata,
+    }
 
-    updated_frames = []
-    for frame_result in batch_result.frame_results:
-        updated_frames.append(write_frame_report(frame_result, paths["per_frame_report_dir"]))
 
+def write_streamed_frame_report(frame_result, context):
+    """Persist one frame immediately, then release its large in-memory payload."""
+    frame_result = write_frame_report(
+        frame_result,
+        context["paths"]["per_frame_report_dir"],
+    )
+    retained_artifacts = {
+        key: frame_result.artifacts[key]
+        for key in ("box_mode", "parameters", "frame_report_path")
+        if key in frame_result.artifacts
+    }
+    frame_result.artifacts = retained_artifacts
+    return frame_result
+
+
+def finalize_batch_report(batch_result, context, command=None, finished_at=None):
+    paths = context["paths"]
     final_batch = rebuild_batch_after_report_write(
         batch_result,
-        updated_frames,
-        run_id=run_id,
-        started_at=started_at,
+        batch_result.frame_results,
+        run_id=context["run_id"],
+        started_at=context["started_at"],
         finished_at=None,
         total_time_ms=None,
-        config_hash=config_hash,
-        git_metadata=git_metadata,
+        config_hash=context["config_hash"],
+        git_metadata=context["git_metadata"],
         artifacts={key: str(value) for key, value in paths.items()},
     )
     write_required_json(paths["frame_manifest"], build_frame_manifest(final_batch), ErrorCode.FRAME_MANIFEST_WRITE_FAILED)
@@ -124,6 +175,7 @@ def write_batch_report(
         ErrorCode.CSV_WRITE_FAILED,
     )
     final_batch.finished_at = finished_at or utc_now_iso()
+    total_start_time = context["total_start_time"]
     final_batch.total_time_ms = elapsed_ms(total_start_time) if total_start_time is not None else None
     summary = build_summary(final_batch, command=command)
     write_required_json(paths["summary_json"], summary, ErrorCode.SUMMARY_WRITE_FAILED)
@@ -299,6 +351,7 @@ def rebuild_batch_after_report_write(batch_result, frame_results, run_id, starte
         auxiliary_iou_thresholds=parameters.get("auxiliary_iou_thresholds", [0.25]),
         gesr_enabled=parameters.get("gesr_enabled", False),
         gesr_reason_attribution=parameters.get("gesr_reason_attribution", True),
+        gesr_evidence_level=parameters.get("gesr_evidence_level", "detailed"),
     )
     rebuilt.schema_version = SCHEMA_VERSION
     rebuilt.run_id = run_id

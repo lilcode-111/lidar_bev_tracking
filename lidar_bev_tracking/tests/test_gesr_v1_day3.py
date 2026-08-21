@@ -7,6 +7,7 @@ import numpy as np
 
 from bev_tracking.gesr_v1 import (
     GESRV1Error,
+    build_gesr_v1_compact_evidence,
     build_seed_components_optimized,
     build_seed_components_reference,
     run_gesr_v1_optimized,
@@ -44,6 +45,43 @@ def _tie_cloud():
 
 
 class GESRV1Day3Test(unittest.TestCase):
+    def test_compact_runtime_keeps_decisions_and_omits_unrelated_components(self):
+        rows = []
+        source_indices = []
+        for component_index in range(20):
+            center_x = component_index * 3.0
+            for offset_x, offset_y in ((0.0, -0.05), (0.0, 0.05), (0.1, -0.05), (0.1, 0.05)):
+                rows.append(_point(center_x + offset_x, offset_y, 0.5))
+                source_indices.append(len(source_indices) + 1)
+        rows.append(_point(0.65, 0.0, 0.2))
+        source_indices.append(1000)
+        points = np.asarray(rows, dtype=np.float64)
+        indices = np.asarray(source_indices, dtype=np.int64)
+
+        detailed = run_gesr_v1_optimized("1", points, indices)
+        compact = run_gesr_v1_optimized(
+            "1", points, indices, compact_evidence=True
+        )
+
+        self.assertEqual(detailed.accepted_source_indices, compact.accepted_source_indices)
+        self.assertEqual(detailed.expanded_source_indices, compact.expanded_source_indices)
+        self.assertEqual(
+            [
+                (item.accepted, item.selected_component_runtime_id, item.point_terminal_decision)
+                for item in detailed.candidate_decisions
+            ],
+            [
+                (item.accepted, item.selected_component_runtime_id, item.point_terminal_decision)
+                for item in compact.candidate_decisions
+            ],
+        )
+        self.assertEqual(len(detailed.candidate_decisions[0].associations), 20)
+        self.assertEqual(len(compact.candidate_decisions[0].associations), 1)
+        evidence = build_gesr_v1_compact_evidence(compact)
+        self.assertEqual(evidence["evidence_level"], "compact")
+        self.assertNotIn("candidate_decisions", evidence)
+        self.assertEqual(evidence["point_counts"]["candidate"], 1)
+
     def test_positive_grid_boundary_does_not_split_component(self):
         points = np.asarray([
             _point(0.40, 0.0, 0.5), _point(0.59, 0.0, 0.5),

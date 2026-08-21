@@ -53,6 +53,7 @@ class BatchReportIntegrationTest(unittest.TestCase):
                     "oriented": True,
                     "gesr_enabled": True,
                     "gesr_reason_attribution": True,
+                    "gesr_evidence_level": "compact",
                 },
                 "nms": {"iou_threshold": 0.3},
                 "evaluation": {"iou_threshold": 0.5, "auxiliary_iou_thresholds": [0.25]},
@@ -64,8 +65,11 @@ class BatchReportIntegrationTest(unittest.TestCase):
 
             def fake_batch_result(**kwargs):
                 captured.update(kwargs)
+                streamed_frame = success_frame("000000")
+                streamed_frame.artifacts["large_payload"] = ["discarded-after-write"]
+                streamed_frame = kwargs["frame_result_callback"](streamed_frame)
                 return build_batch_result(
-                    frame_results=[success_frame("000000")],
+                    frame_results=[streamed_frame],
                     data_root=kwargs["data_root"],
                     frame_ids=kwargs["frame_ids"],
                     eps=kwargs["eps"],
@@ -74,6 +78,7 @@ class BatchReportIntegrationTest(unittest.TestCase):
                     nms_iou_threshold=kwargs["nms_iou_threshold"],
                     eval_iou_threshold=kwargs["eval_iou_threshold"],
                     auxiliary_iou_thresholds=kwargs["auxiliary_iou_thresholds"],
+                    gesr_evidence_level=kwargs["gesr_evidence_level"],
                 )
 
             try:
@@ -91,11 +96,20 @@ class BatchReportIntegrationTest(unittest.TestCase):
             self.assertTrue(captured["oriented"])
             self.assertTrue(captured["gesr_enabled"])
             self.assertTrue(captured["gesr_reason_attribution"])
+            self.assertEqual(captured["gesr_evidence_level"], "compact")
             self.assertIs(captured["progress_callback"], progress_callback)
+            self.assertNotIn("large_payload", final_batch.frame_results[0].artifacts)
             self.assertEqual(final_batch.frame_counts["metric_valid"], 1)
             self.assertTrue(paths["summary_json"].exists())
             self.assertTrue(paths["frames_csv"].exists())
             self.assertTrue((paths["per_frame_report_dir"] / "000000.json").exists())
+            frame_payload = json.loads(
+                (paths["per_frame_report_dir"] / "000000.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                frame_payload["artifacts"]["large_payload"],
+                ["discarded-after-write"],
+            )
 
             summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
             self.assertEqual(summary["run"]["command"], "unit-test command")
