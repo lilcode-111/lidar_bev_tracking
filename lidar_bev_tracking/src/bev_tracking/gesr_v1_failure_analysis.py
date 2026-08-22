@@ -179,15 +179,13 @@ def analyze_gt_failure(
             "gain_vs_T0": iou_gain(oracle["iou"], t0_iou),
         }
 
-    all_rejected_oracle = compact_oracle(
-        points, np.union1d(gesr_gt, missed_added), gt_box
+    all_rejected_indices = np.union1d(gesr_gt, missed_added)
+    all_rejected_oracle = compact_oracle(points, all_rejected_indices, gt_box)
+    all_rejected_runtime_only = int(
+        len(np.setdiff1d(all_rejected_indices, t2_gt, assume_unique=True))
     )
-    require_iou_replay(
-        "all-rejected/T2",
-        all_rejected_oracle["iou"],
-        representations["T2"]["iou"],
-        frame_id,
-        gt_id,
+    all_rejected_t2_only = int(
+        len(np.setdiff1d(t2_gt, all_rejected_indices, assume_unique=True))
     )
 
     marginal_points = []
@@ -243,6 +241,19 @@ def analyze_gt_failure(
         },
         "representations": representations,
         "counterfactual_add_rejected_reason_to_GESR": counterfactuals,
+        "counterfactual_add_all_rejected_to_GESR": {
+            "iou": all_rejected_oracle["iou"],
+            "gain_vs_GESR": iou_gain(all_rejected_oracle["iou"], gesr_iou),
+            "gain_vs_T0": iou_gain(all_rejected_oracle["iou"], t0_iou),
+            "identity_matches_T2": (
+                all_rejected_runtime_only == 0 and all_rejected_t2_only == 0
+            ),
+            "counterfactual_only_point_count": all_rejected_runtime_only,
+            "T2_only_point_count": all_rejected_t2_only,
+            "iou_delta_vs_T2": iou_gain(
+                all_rejected_oracle["iou"], representations["T2"]["iou"]
+            ),
+        },
         "top_missed_single_point_marginals": marginal_points[:TOP_MISSED_POINT_COUNT],
     }
 

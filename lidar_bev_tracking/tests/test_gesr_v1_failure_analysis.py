@@ -117,6 +117,9 @@ class GESRV1FailureAnalysisTest(unittest.TestCase):
         self.assertEqual(record["missed_terminal_reason_counts"]["INSIDE_CURRENT_EXTENT"], 1)
         self.assertEqual(record["missed_terminal_reason_counts"]["NO_VALID_COMPONENT"], 1)
         self.assertEqual(len(record["top_missed_single_point_marginals"]), 2)
+        self.assertTrue(
+            record["counterfactual_add_all_rejected_to_GESR"]["identity_matches_T2"]
+        )
         self.assertEqual(
             record["representations"]["T2"]["iou"],
             compact_oracle(points, t2, gt_box)["iou"],
