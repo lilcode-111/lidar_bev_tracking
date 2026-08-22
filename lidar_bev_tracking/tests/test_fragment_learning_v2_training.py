@@ -1,10 +1,12 @@
 import unittest
+import json
 
 import numpy as np
 
 from bev_tracking.fragment_learning_v2_training import (
     _interpret,
     _margin_coverage,
+    _to_builtin,
 )
 from bev_tracking.fragment_learning_multiseed_analysis import build_multiseed_record
 from bev_tracking.fragment_phase0 import build_candidate_fragments
@@ -41,6 +43,17 @@ class FragmentLearningV2TrainingTest(unittest.TestCase):
         self.assertEqual(_interpret(gates, 0.005, 10, 29), "INCONCLUSIVE")
         self.assertEqual(_interpret(gates, -0.001, 2, 29), "NOT_SUPPORTED")
         self.assertEqual(_interpret(gates, 0.03, 30, 26), "NOT_SUPPORTED")
+
+    def test_numpy_gate_scalars_are_json_serializable(self):
+        value = {
+            "passed": np.bool_(True),
+            "count": np.int64(3),
+            "metric": np.float64(0.25),
+        }
+        normalized = _to_builtin(value)
+        self.assertEqual(json.loads(json.dumps(normalized)), {
+            "passed": True, "count": 3, "metric": 0.25,
+        })
 
 
 if __name__ == "__main__":

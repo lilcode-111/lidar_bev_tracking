@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 import csv
 import json
 from pathlib import Path
+import warnings
 
 import numpy as np
 
@@ -35,6 +36,19 @@ FROZEN_M1 = {
 
 class FragmentLearningV2Error(ValueError):
     pass
+
+
+def _to_builtin(value):
+    """Recursively normalize NumPy scalars before JSON serialization."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {key: _to_builtin(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_builtin(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_builtin(item) for item in value]
+    return value
 
 
 def _read_csv(path):
@@ -212,7 +226,13 @@ def train_fragment_learning_v2(
         negative_train = int(training.sum() - positive_train)
         model = m2_factory(negative_train / positive_train)
         model.fit(X_m2[training], y[training])
-        m2_scores[validation] = model.predict_proba(X_m2[validation])[:, 1]
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
+                category=UserWarning,
+            )
+            m2_scores[validation] = model.predict_proba(X_m2[validation])[:, 1]
         m1_metrics = _binary_metrics(y[validation], m1_scores[validation])
         m2_metrics = _binary_metrics(y[validation], m2_scores[validation])
         fold_rows.append({
@@ -308,6 +328,7 @@ def train_fragment_learning_v2(
     result_path = output_dir / "lightgbm_v2_development_result.json"
     oof_path = output_dir / "lightgbm_v2_oof_predictions.csv"
     margin_path = output_dir / "lightgbm_v2_margin_feature.csv"
+    result = _to_builtin(result)
     result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     with oof_path.open("w", newline="", encoding="utf-8") as handle:
         fields = (
