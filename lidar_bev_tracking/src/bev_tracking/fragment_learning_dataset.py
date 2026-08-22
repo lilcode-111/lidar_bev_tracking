@@ -135,11 +135,25 @@ def select_fragment_learning_manifest(
     selection_seed=MANIFEST_SELECTION_SEED,
 ):
     """Apply the frozen select-once procedure without reading any labels."""
+    return select_fragment_learning_manifest_from_ids(
+        collect_eligible_frame_ids(data_root),
+        fixed_100_manifest,
+        frame_count=frame_count,
+        selection_seed=selection_seed,
+    )
+
+
+def select_fragment_learning_manifest_from_ids(
+    complete_frame_ids,
+    fixed_100_manifest,
+    *,
+    frame_count=MANIFEST_FRAME_COUNT,
+    selection_seed=MANIFEST_SELECTION_SEED,
+):
+    """Apply the same frozen selection to a complete, prevalidated frame catalog."""
     fixed = set(_manifest_ids(fixed_100_manifest))
-    eligible = [
-        frame_id for frame_id in collect_eligible_frame_ids(data_root)
-        if frame_id not in fixed
-    ]
+    complete = sorted({str(frame_id).zfill(6) for frame_id in complete_frame_ids})
+    eligible = [frame_id for frame_id in complete if frame_id not in fixed]
     if len(eligible) < frame_count:
         raise DatasetConstructionError(
             "DATASET_CONSTRUCTION_ERROR: "

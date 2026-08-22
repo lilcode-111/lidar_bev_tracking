@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import ExitStack
 import csv
 import json
 import os
 from pathlib import Path
+import shutil
+import zipfile
 
 import numpy as np
 
@@ -24,6 +27,7 @@ from bev_tracking.fragment_learning_dataset import (
     feature_schema_payload,
     run_feature_leakage_gate,
     select_fragment_learning_manifest,
+    select_fragment_learning_manifest_from_ids,
     write_feature_schema,
     write_fragment_learning_manifest,
 )
@@ -57,6 +61,24 @@ SUFFICIENCY_REQUIREMENTS = {
     "N1_fragments_min": 20,
     "N1_support_frames_min": 5,
     "N0_fragments_min": 1,
+}
+
+KITTI_ARCHIVE_SPECS = {
+    "velodyne": {
+        "archive": "data_object_velodyne.zip",
+        "prefix": "training/velodyne/",
+        "suffix": ".bin",
+    },
+    "label_2": {
+        "archive": "data_object_label_2.zip",
+        "prefix": "training/label_2/",
+        "suffix": ".txt",
+    },
+    "calib": {
+        "archive": "data_object_calib.zip",
+        "prefix": "training/calib/",
+        "suffix": ".txt",
+    },
 }
 
 
@@ -93,9 +115,158 @@ def prepare_or_validate_manifest(data_root, fixed_100_manifest, manifest_path):
     return expected
 
 
-def _oracle_association(raw, fragment, gt_box, t0_gt_indices):
+def _archive_frame_entries(archive, prefix, suffix):
+    entries = {}
+    for info in archive.infolist():
+        name = info.filename.replace("\\", "/")
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        relative = name[len(prefix):]
+        if "/" in relative or relative == suffix:
+            continue
+        frame_id = relative[: -len(suffix)].zfill(6)
+        if frame_id in entries:
+            raise DatasetConstructionError(
+                f"DATASET_CONSTRUCTION_ERROR: duplicate archive frame {frame_id}"
+            )
+        entries[frame_id] = info
+    return entries
+
+
+def collect_complete_archive_frame_ids(archive_dir):
+    """Read ZIP central directories only and intersect the three training inputs."""
+    archive_dir = Path(archive_dir)
+    frame_sets = []
+    try:
+        for spec in KITTI_ARCHIVE_SPECS.values():
+            path = archive_dir / spec["archive"]
+            if not path.is_file():
+                raise DatasetConstructionError(
+                    f"DATASET_CONSTRUCTION_ERROR: missing KITTI archive: {path}"
+                )
+            with zipfile.ZipFile(path) as archive:
+                entries = _archive_frame_entries(
+                    archive, spec["prefix"], spec["suffix"]
+                )
+            if not entries:
+                raise DatasetConstructionError(
+                    f"DATASET_CONSTRUCTION_ERROR: no training entries in {path}"
+                )
+            frame_sets.append(set(entries))
+    except zipfile.BadZipFile as exc:
+        raise DatasetConstructionError(
+            f"DATASET_CONSTRUCTION_ERROR: invalid KITTI ZIP: {exc}"
+        ) from exc
+    return sorted(set.intersection(*frame_sets))
+
+
+def _validate_or_write_expected_manifest(expected, manifest_path):
+    manifest_path = Path(manifest_path)
+    if manifest_path.exists():
+        actual = _read_frozen_manifest(manifest_path)
+        if actual != expected:
+            raise DatasetConstructionError(
+                "DATASET_CONSTRUCTION_ERROR: existing learning manifest differs "
+                "from the frozen complete-archive selection"
+            )
+        return actual
+    write_fragment_learning_manifest(expected, manifest_path)
+    return expected
+
+
+def _copy_archive_entry(archive, info, destination):
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and destination.stat().st_size == info.file_size:
+        return False
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    if temporary.exists():
+        temporary.unlink()
+    try:
+        with archive.open(info) as source, temporary.open("wb") as target:
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+        if temporary.stat().st_size != info.file_size:
+            raise DatasetConstructionError(
+                f"DATASET_CONSTRUCTION_ERROR: extracted size mismatch: {destination}"
+            )
+        os.replace(temporary, destination)
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+    return True
+
+
+def prepare_selected_archive_cache(
+    archive_dir,
+    fixed_100_manifest,
+    manifest_path,
+    cache_root,
+    *,
+    progress_callback=None,
+):
+    """Select against all complete ZIP entries, then stage only the frozen 64."""
+    complete_ids = collect_complete_archive_frame_ids(archive_dir)
+    selected = select_fragment_learning_manifest_from_ids(
+        complete_ids, fixed_100_manifest
+    )
+    selected = _validate_or_write_expected_manifest(selected, manifest_path)
+    archive_dir = Path(archive_dir)
+    cache_root = Path(cache_root)
+    extracted_file_count = 0
+    try:
+        with ExitStack() as stack:
+            archives = {}
+            entries_by_kind = {}
+            for kind, spec in KITTI_ARCHIVE_SPECS.items():
+                archive = stack.enter_context(
+                    zipfile.ZipFile(archive_dir / spec["archive"])
+                )
+                archives[kind] = archive
+                entries_by_kind[kind] = _archive_frame_entries(
+                    archive, spec["prefix"], spec["suffix"]
+                )
+            for index, frame_id in enumerate(selected, start=1):
+                if progress_callback:
+                    progress_callback(index, len(selected), frame_id)
+                for kind, spec in KITTI_ARCHIVE_SPECS.items():
+                    info = entries_by_kind[kind].get(frame_id)
+                    if info is None:
+                        raise DatasetConstructionError(
+                            "DATASET_CONSTRUCTION_ERROR: selected frame missing from "
+                            f"{kind} archive: {frame_id}"
+                        )
+                    destination = (
+                        cache_root / "training" / kind / f"{frame_id}{spec['suffix']}"
+                    )
+                    extracted_file_count += int(
+                        _copy_archive_entry(archives[kind], info, destination)
+                    )
+    except DatasetConstructionError:
+        raise
+    except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+        raise DatasetConstructionError(
+            f"DATASET_CONSTRUCTION_ERROR: archive staging failed: {exc}"
+        ) from exc
+    return {
+        "frame_ids": selected,
+        "cache_root": cache_root,
+        "complete_archive_frame_count": len(complete_ids),
+        "selected_frame_count": len(selected),
+        "newly_extracted_file_count": extracted_file_count,
+    }
+
+
+def _oracle_association(
+    raw, fragment, gt_box, t0_gt_indices, t2_minus_t0_candidate_indices
+):
     fragment_indices = np.asarray(fragment["source_indices"], dtype=np.int64)
-    inside = points_in_oriented_3d_box(raw[fragment_indices], gt_box)
+    recovery_indices = np.intersect1d(
+        fragment_indices,
+        t2_minus_t0_candidate_indices,
+        assume_unique=True,
+    )
+    inside = points_in_oriented_3d_box(raw[recovery_indices], gt_box)
     recovery_point_count = int(inside.sum())
     if recovery_point_count == 0:
         return None
@@ -143,10 +314,11 @@ def build_frame_dataset_rows(raw, boxes, frame_id):
         stage_indices["intensity_filter"],
         assume_unique=True,
     )
-    if not np.array_equal(np.sort(candidate_indices), expected_candidate_indices):
-        raise DatasetConstructionError(
-            f"DATASET_CONSTRUCTION_ERROR: T2-T0 candidate identity mismatch in {frame_id}"
-        )
+    t2_minus_t0_candidate_indices = np.intersect1d(
+        candidate_indices,
+        expected_candidate_indices,
+        assume_unique=True,
+    )
 
     fragments = build_candidate_fragments(
         z_points[candidate_mask], candidate_indices
@@ -195,7 +367,11 @@ def build_frame_dataset_rows(raw, boxes, frame_id):
         associations = []
         for box in positive_boxes:
             association = _oracle_association(
-                raw, fragment, box, t0_by_gt[str(box["id"])]
+                raw,
+                fragment,
+                box,
+                t0_by_gt[str(box["id"])],
+                t2_minus_t0_candidate_indices,
             )
             if association is not None:
                 associations.append(association)
@@ -418,5 +594,48 @@ def prepare_and_construct_dataset(
         progress_callback=progress_callback,
     )
     summary["manifest"] = str(manifest_path)
+    summary_path = write_construction_summary(summary, output_dir)
+    return summary, summary_path
+
+
+def prepare_and_construct_archive_dataset(
+    archive_dir,
+    fixed_100_manifest,
+    output_dir,
+    cache_root,
+    *,
+    staging_progress_callback=None,
+    construction_progress_callback=None,
+):
+    """Construct from official ZIPs while staging only the frozen 64 frames."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "fragment_learning_dev_manifest.txt"
+    staging = prepare_selected_archive_cache(
+        archive_dir,
+        fixed_100_manifest,
+        manifest_path,
+        cache_root,
+        progress_callback=staging_progress_callback,
+    )
+    write_feature_schema(output_dir / "fragment_feature_schema_v1.json")
+    summary = construct_fragment_learning_dataset(
+        staging["cache_root"],
+        staging["frame_ids"],
+        output_dir,
+        progress_callback=construction_progress_callback,
+    )
+    summary.update(
+        {
+            "input_mode": "official_KITTI_archives_selected_64_cache",
+            "archive_dir": str(Path(archive_dir)),
+            "selected_input_cache": str(staging["cache_root"]),
+            "complete_archive_frame_count": staging[
+                "complete_archive_frame_count"
+            ],
+            "newly_extracted_file_count": staging["newly_extracted_file_count"],
+            "manifest": str(manifest_path),
+        }
+    )
     summary_path = write_construction_summary(summary, output_dir)
     return summary, summary_path

@@ -3,15 +3,18 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+import zipfile
 
 import numpy as np
 
 from bev_tracking.fragment_learning_construction import (
     ALL_LABELS,
     build_frame_dataset_rows,
+    collect_complete_archive_frame_ids,
     construct_fragment_learning_dataset,
     dataset_sufficiency,
     prepare_or_validate_manifest,
+    prepare_selected_archive_cache,
 )
 from bev_tracking.fragment_learning_dataset import (
     DatasetConstructionError,
@@ -20,6 +23,53 @@ from bev_tracking.fragment_learning_dataset import (
 
 
 class FragmentLearningConstructionTest(unittest.TestCase):
+    def _write_official_archive_triplet(self, root, frame_ids):
+        specs = {
+            "data_object_velodyne.zip": ("training/velodyne", ".bin", b"bin"),
+            "data_object_label_2.zip": ("training/label_2", ".txt", b"label"),
+            "data_object_calib.zip": ("training/calib", ".txt", b"calib"),
+        }
+        for archive_name, (folder, suffix, payload) in specs.items():
+            with zipfile.ZipFile(root / archive_name, "w") as archive:
+                for frame_id in frame_ids:
+                    archive.writestr(f"{folder}/{frame_id}{suffix}", payload)
+
+    def test_official_archives_select_full_catalog_and_stage_only_64(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frame_ids = [f"{value:06d}" for value in range(70)]
+            self._write_official_archive_triplet(root, frame_ids)
+            fixed = root / "fixed.txt"
+            fixed.write_text(
+                "\n".join(f"{value:06d}" for value in range(6)) + "\n",
+                encoding="utf-8",
+            )
+            manifest = root / "output" / "manifest.txt"
+            cache = root / "cache"
+            self.assertEqual(len(collect_complete_archive_frame_ids(root)), 70)
+            result = prepare_selected_archive_cache(
+                root, fixed, manifest, cache
+            )
+            self.assertEqual(result["complete_archive_frame_count"], 70)
+            self.assertEqual(result["selected_frame_count"], 64)
+            self.assertEqual(result["newly_extracted_file_count"], 192)
+            selected = manifest.read_text().splitlines()
+            self.assertEqual(selected, sorted(selected))
+            self.assertFalse(set(selected) & {f"{value:06d}" for value in range(6)})
+            self.assertEqual(
+                len(list((cache / "training" / "velodyne").glob("*.bin"))), 64
+            )
+            self.assertEqual(
+                len(list((cache / "training" / "label_2").glob("*.txt"))), 64
+            )
+            self.assertEqual(
+                len(list((cache / "training" / "calib").glob("*.txt"))), 64
+            )
+            replay = prepare_selected_archive_cache(
+                root, fixed, manifest, cache
+            )
+            self.assertEqual(replay["newly_extracted_file_count"], 0)
+
     def test_frame_builder_emits_unique_GT_free_runtime_rows(self):
         raw = np.asarray(
             [
@@ -56,6 +106,36 @@ class FragmentLearningConstructionTest(unittest.TestCase):
         ]
         self.assertEqual(len(associated), 1)
         self.assertNotIn("gt_id", associated[0]["model_feature_fields"])
+
+    def test_float32_threshold_candidate_does_not_fake_T2_minus_T0_association(self):
+        raw = np.asarray(
+            [
+                [5.0, -0.2, 0.0, 0.50],
+                [5.0, 0.2, 0.0, 0.50],
+                [5.4, -0.2, 0.0, 0.50],
+                [5.4, 0.2, 0.0, 0.50],
+                [6.0, 0.0, 0.0, 0.38],
+            ],
+            dtype=np.float32,
+        )
+        box = {
+            "id": "gt_1", "class_name": "car", "x": 5.5, "y": 0.0,
+            "z": 0.0, "length": 4.0, "width": 2.0, "height": 2.0,
+            "yaw": 0.0,
+        }
+        result = build_frame_dataset_rows(raw, [box], "25")
+        boundary_rows = [
+            row for row in result["rows"]
+            if row["metadata_fields"]["canonical_fragment_identity"] == 4
+        ]
+        self.assertEqual(len(boundary_rows), 1)
+        self.assertEqual(
+            boundary_rows[0]["diagnostic_fields"]["associated_positive_car_GT"],
+            [],
+        )
+        self.assertEqual(
+            boundary_rows[0]["label_field"]["label"], "UNLABELED_OTHER"
+        )
 
     def test_runtime_features_do_not_change_when_GT_is_removed_or_modified(self):
         raw = np.asarray(
