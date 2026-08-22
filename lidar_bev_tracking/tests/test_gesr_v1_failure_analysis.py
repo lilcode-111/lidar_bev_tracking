@@ -109,6 +109,11 @@ class GESRV1FailureAnalysisTest(unittest.TestCase):
         self.assertEqual(record["point_counts"]["T2_added_GT"], 3)
         self.assertEqual(record["point_counts"]["GESR_accepted_from_T2_added"], 1)
         self.assertEqual(record["point_counts"]["GESR_missed_from_T2_added"], 2)
+        self.assertTrue(
+            record["representation_identity_check"][
+                "runtime_expanded_matches_T0_union_accepted_GT"
+            ]
+        )
         self.assertEqual(record["missed_terminal_reason_counts"]["INSIDE_CURRENT_EXTENT"], 1)
         self.assertEqual(record["missed_terminal_reason_counts"]["NO_VALID_COMPONENT"], 1)
         self.assertEqual(len(record["top_missed_single_point_marginals"]), 2)

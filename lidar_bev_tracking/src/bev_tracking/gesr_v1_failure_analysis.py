@@ -141,7 +141,18 @@ def analyze_gt_failure(
             f"missed-point terminal attribution incomplete: {frame_id}/{gt_id}"
         )
 
-    gesr_gt = np.union1d(t0_gt, accepted_added)
+    reconstructed_gesr_gt = np.union1d(t0_gt, accepted_added)
+    gesr_gt = gt_point_indices(
+        points,
+        np.asarray(gesr_result.expanded_source_indices, dtype=np.int64),
+        gt_box,
+    )
+    runtime_only_count = int(
+        len(np.setdiff1d(gesr_gt, reconstructed_gesr_gt, assume_unique=True))
+    )
+    reconstructed_only_count = int(
+        len(np.setdiff1d(reconstructed_gesr_gt, gesr_gt, assume_unique=True))
+    )
     representations = {
         "T0": compact_oracle(points, t0_gt, gt_box),
         "T2": compact_oracle(points, t2_gt, gt_box),
@@ -220,6 +231,13 @@ def analyze_gt_failure(
         "acceptance_rate_of_T2_added": (
             float(len(accepted_added) / len(t2_added)) if len(t2_added) else None
         ),
+        "representation_identity_check": {
+            "runtime_expanded_matches_T0_union_accepted_GT": (
+                runtime_only_count == 0 and reconstructed_only_count == 0
+            ),
+            "runtime_only_point_count": runtime_only_count,
+            "reconstructed_only_point_count": reconstructed_only_count,
+        },
         "missed_terminal_reason_counts": {
             reason: int(len(reason_indices[reason])) for reason in REJECTION_CODES
         },
