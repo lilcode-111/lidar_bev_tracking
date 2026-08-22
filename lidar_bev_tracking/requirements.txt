@@ -5,3 +5,4 @@ opencv-python
 pyyaml
 tqdm
 scikit-learn==1.6.1
+lightgbm==4.6.0
