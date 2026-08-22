@@ -1,4 +1,4 @@
-"""Frozen Day-1 semantics for the fragment_learning_dev_v1 dataset.
+"""Frozen semantics for the fragment_learning_dev_v1 dataset.
 
 Runtime feature extraction is deliberately GT-free.  GT and counterfactual
 information is accepted only by the separate offline label builder.
