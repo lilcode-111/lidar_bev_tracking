@@ -133,6 +133,7 @@ def build_fragment_record(sorted_points, sorted_indices, member_source_indices):
         "range": float(np.linalg.norm(center)),
         "intensity_min": float(member_points[:, 3].min()),
         "intensity_mean": float(member_points[:, 3].mean()),
+        "intensity_std": float(member_points[:, 3].std()),
         "intensity_max": float(member_points[:, 3].max()),
     }
 
