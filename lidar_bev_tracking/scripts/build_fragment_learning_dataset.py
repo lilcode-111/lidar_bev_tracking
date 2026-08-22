@@ -5,13 +5,14 @@ from bev_tracking.fragment_learning_construction import (
     prepare_and_construct_archive_dataset,
     prepare_and_construct_dataset,
 )
+from bev_tracking.fragment_learning_split import generate_fragment_learning_splits
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Construct fragment_learning_dev_v1 without model training."
     )
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument(
         "--data-root",
         help="KITTI root containing training/velodyne, label_2, and calib.",
@@ -31,11 +32,32 @@ def parse_args():
         default="outputs/fragment_learning_dev_v1/selected_input_cache",
         help="WSL-local cache used only with --archive-dir.",
     )
+    parser.add_argument(
+        "--generate-splits-only",
+        action="store_true",
+        help="Read the completed dataset and generate frozen 5-fold splits only.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.generate_splits_only:
+        if args.archive_dir or args.data_root:
+            raise SystemExit(
+                "--generate-splits-only cannot be combined with an input source"
+            )
+        result, split_path = generate_fragment_learning_splits(
+            args.output_dir, args.fixed_100_manifest
+        )
+        print(json.dumps(result, indent=2))
+        print(f"saved {split_path}")
+        print("MODEL TRAINING = NOT PERFORMED")
+        raise SystemExit(0)
+    if not args.archive_dir and not args.data_root:
+        raise SystemExit(
+            "dataset construction requires --data-root or --archive-dir"
+        )
     if args.archive_dir:
         summary, summary_path = prepare_and_construct_archive_dataset(
             args.archive_dir,
