@@ -18,6 +18,7 @@ from bev_tracking.fragment_phase0 import best_endpoint_relation
 
 
 SCHEMA_VERSION = "fragment-learning-phase1-3-neighbor-context-v1"
+PHASE1_4_SCHEMA_VERSION = "fragment-learning-phase1-4-local-multi-fragment-v1"
 MODERATE_SMD = 0.50
 SMALL_SMD = 0.30
 MIN_FOLD_DIRECTION_MATCHES = 4
@@ -81,10 +82,12 @@ def _effect(left, right):
     }
 
 
-def nearest_fragment_relation(raw, target, fragments, component, seed_relation):
-    """Find the nearest distinct fragment and express its contact vector in seed PCA."""
+def ranked_fragment_relations(
+    raw, target, fragments, component, seed_relation, *, neighbor_count
+):
+    """Rank distinct fragments by frozen contact distance and express them in seed PCA."""
     target_points = np.asarray(raw[target["source_indices"], :2], dtype=np.float64)
-    best = None
+    ranked = []
     for neighbor_id in sorted(fragments):
         if neighbor_id == int(target["runtime_id"]):
             continue
@@ -98,16 +101,10 @@ def nearest_fragment_relation(raw, target, fragments, component, seed_relation):
             int(target["source_indices"][target_position]),
             int(neighbor["source_indices"][neighbor_position]),
         )
-        if best is None or key < best[0]:
-            best = (key, neighbor, target_position, neighbor_position)
-    if best is None:
+        ranked.append((key, neighbor, target_position, neighbor_position))
+    ranked.sort(key=lambda item: item[0])
+    if not ranked:
         raise NeighborContextAnalysisError("target frame has no distinct neighboring fragment")
-    key, neighbor, target_position, neighbor_position = best
-    target_contact = target_points[target_position]
-    neighbor_contact = np.asarray(
-        raw[neighbor["source_indices"][neighbor_position], :2], dtype=np.float64
-    )
-    displacement = neighbor_contact - target_contact
     geometry = component.geometry
     major = np.asarray(geometry.major, dtype=np.float64)
     minor = np.asarray(geometry.minor, dtype=np.float64)
@@ -116,20 +113,52 @@ def nearest_fragment_relation(raw, target, fragments, component, seed_relation):
     else:
         axis, perpendicular = minor, -major
     outward = -axis if seed_relation["seed_outward_side"] == "NEG" else axis
-    distance = float(np.linalg.norm(displacement))
-    outward_projection = float(displacement @ outward)
-    lateral_projection = float(displacement @ perpendicular)
+    output = []
+    for rank, (_, neighbor, target_position, neighbor_position) in enumerate(
+        ranked[:neighbor_count], start=1
+    ):
+        target_contact = target_points[target_position]
+        neighbor_contact = np.asarray(
+            raw[neighbor["source_indices"][neighbor_position], :2], dtype=np.float64
+        )
+        displacement = neighbor_contact - target_contact
+        distance = float(np.linalg.norm(displacement))
+        outward_projection = float(displacement @ outward)
+        lateral_projection = float(displacement @ perpendicular)
+        output.append({
+            "neighbor_rank": rank,
+            "neighbor_fragment_identity": int(neighbor["runtime_id"]),
+            "neighbor_fragment_type": neighbor["fragment_type"],
+            "neighbor_point_count": int(neighbor["point_count"]),
+            "target_contact_source_index": int(target["source_indices"][target_position]),
+            "neighbor_contact_source_index": int(neighbor["source_indices"][neighbor_position]),
+            "neighbor_distance": distance,
+            "neighbor_outward_projection": outward_projection,
+            "neighbor_lateral_projection": lateral_projection,
+            "neighbor_absolute_lateral_projection": abs(lateral_projection),
+            "neighbor_outward_alignment_cosine": (
+                0.0 if distance == 0.0 else float(outward_projection / distance)
+            ),
+        })
+    return output
+
+
+def nearest_fragment_relation(raw, target, fragments, component, seed_relation):
+    """Backward-compatible Phase-1.3 nearest-neighbor relation."""
+    item = ranked_fragment_relations(
+        raw, target, fragments, component, seed_relation, neighbor_count=1
+    )[0]
     return {
-        "nearest_neighbor_fragment_identity": int(neighbor["runtime_id"]),
-        "nearest_neighbor_fragment_type": neighbor["fragment_type"],
-        "nearest_neighbor_point_count": int(neighbor["point_count"]),
-        "target_contact_source_index": int(target["source_indices"][target_position]),
-        "neighbor_contact_source_index": int(neighbor["source_indices"][neighbor_position]),
-        "nearest_neighbor_distance": distance,
-        "nearest_neighbor_outward_projection": outward_projection,
-        "nearest_neighbor_lateral_projection": lateral_projection,
-        "nearest_neighbor_absolute_lateral_projection": abs(lateral_projection),
-        "nearest_neighbor_outward_alignment_cosine": 0.0 if distance == 0.0 else float(outward_projection / distance),
+        "nearest_neighbor_fragment_identity": item["neighbor_fragment_identity"],
+        "nearest_neighbor_fragment_type": item["neighbor_fragment_type"],
+        "nearest_neighbor_point_count": item["neighbor_point_count"],
+        "target_contact_source_index": item["target_contact_source_index"],
+        "neighbor_contact_source_index": item["neighbor_contact_source_index"],
+        "nearest_neighbor_distance": item["neighbor_distance"],
+        "nearest_neighbor_outward_projection": item["neighbor_outward_projection"],
+        "nearest_neighbor_lateral_projection": item["neighbor_lateral_projection"],
+        "nearest_neighbor_absolute_lateral_projection": item["neighbor_absolute_lateral_projection"],
+        "nearest_neighbor_outward_alignment_cosine": item["neighbor_outward_alignment_cosine"],
     }
 
 
@@ -446,6 +475,233 @@ def analyze_neighbor_context(output_dir, data_root, *, progress_callback=None):
         "nearest_neighbor_fragment_identity", "nearest_neighbor_fragment_type",
         "nearest_neighbor_point_count", "target_contact_source_index",
         "neighbor_contact_source_index", *FIELDS,
+    )
+    with record_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for row in records:
+            writer.writerow({field: row[field] for field in fields})
+    return result, result_path, record_path
+
+
+def replay_multi_fragment_records(output_dir, data_root, *, progress_callback=None):
+    """Replay the frozen graph and retain exactly the two nearest fragments for P/N1."""
+    dataset_identities, targets = _load_frozen_targets(output_dir)
+    targets = [row for row in targets if row["label"] in {"POSITIVE", "N1"}]
+    by_frame = defaultdict(list)
+    for target in targets:
+        by_frame[target["frame_id"]].append(target)
+    if set(by_frame) - set(dataset_identities):
+        raise NeighborContextAnalysisError(
+            "REPLAY_IDENTITY_MISMATCH: target frame is absent from frozen dataset"
+        )
+
+    records = []
+    all_frames = sorted(dataset_identities)
+    for position, frame_id in enumerate(all_frames, start=1):
+        if progress_callback:
+            progress_callback(position, len(all_frames), frame_id)
+        raw, fragments, component_by_id, valid_components = _rebuild_frame_fragments(
+            data_root, frame_id
+        )
+        replay_ids = set(fragments)
+        if replay_ids != dataset_identities[frame_id]:
+            missing = sorted(dataset_identities[frame_id] - replay_ids)[:10]
+            extra = sorted(replay_ids - dataset_identities[frame_id])[:10]
+            raise NeighborContextAnalysisError(
+                f"REPLAY_IDENTITY_MISMATCH: {frame_id}: missing={missing}, extra={extra}"
+            )
+        for target in by_frame.get(frame_id, ()):
+            fragment = fragments[target["fragment_identity"]]
+            relation = best_endpoint_relation(fragment, valid_components)
+            if not relation.get("has_computable_seed_relation"):
+                raise NeighborContextAnalysisError(
+                    f"frozen best-seed relation missing: {frame_id}/{fragment['runtime_id']}"
+                )
+            seed_id = int(relation["seed_component_runtime_id"])
+            if seed_id != target["frozen_best_seed_component_runtime_id"]:
+                raise NeighborContextAnalysisError(
+                    f"REPLAY_IDENTITY_MISMATCH: best seed changed: {frame_id}/{fragment['runtime_id']}"
+                )
+            neighbors = ranked_fragment_relations(
+                raw, fragment, fragments, component_by_id[seed_id], relation,
+                neighbor_count=2,
+            )
+            record = {
+                **target,
+                "fragment_type": fragment["fragment_type"],
+                "target_point_count": int(fragment["point_count"]),
+                "best_seed_component_runtime_id": seed_id,
+                "best_continuation_axis": relation["best_continuation_axis"],
+                "seed_outward_side": relation["seed_outward_side"],
+                "neighbor_count_available": len(neighbors),
+                "multi_neighbor_valid": len(neighbors) == 2,
+            }
+            for rank in (1, 2):
+                item = neighbors[rank - 1] if len(neighbors) >= rank else None
+                prefix = f"N{rank}_"
+                for name in (
+                    "neighbor_fragment_identity", "neighbor_fragment_type",
+                    "neighbor_point_count", "target_contact_source_index",
+                    "neighbor_contact_source_index", "neighbor_distance",
+                    "neighbor_outward_projection", "neighbor_lateral_projection",
+                    "neighbor_absolute_lateral_projection",
+                    "neighbor_outward_alignment_cosine",
+                ):
+                    record[prefix + name] = None if item is None else item[name]
+            record["L1"] = record["N1_neighbor_absolute_lateral_projection"]
+            record["L2"] = record["N2_neighbor_absolute_lateral_projection"]
+            record["multi_neighbor_lateral_envelope"] = (
+                max(record["L1"], record["L2"])
+                if record["multi_neighbor_valid"] else None
+            )
+            records.append(record)
+    if len(records) != 177:
+        raise NeighborContextAnalysisError(
+            f"frozen POSITIVE/N1 target count changed: {len(records)}"
+        )
+    return records
+
+
+def _phase1_4_subset(records, *, label=None, fold=None, singleton_only=False):
+    return [
+        row for row in records
+        if (label is None or row["label"] == label)
+        and (fold is None or row["fold"] == fold)
+        and (not singleton_only or row["fragment_type"] == "SINGLETON")
+    ]
+
+
+def _phase1_4_stats(records, *, singleton_only=False):
+    field = "multi_neighbor_lateral_envelope"
+    groups = {}
+    for label in ("POSITIVE", "N1"):
+        selected = _phase1_4_subset(
+            records, label=label, singleton_only=singleton_only
+        )
+        valid = [row[field] for row in selected if row[field] is not None]
+        groups[label] = {
+            "sample_N": len(selected),
+            "valid_N": len(valid),
+            "invalid_N": len(selected) - len(valid),
+            "distribution": _distribution(valid),
+        }
+    effect = _effect(
+        [row[field] for row in _phase1_4_subset(
+            records, label="POSITIVE", singleton_only=singleton_only
+        ) if row[field] is not None],
+        [row[field] for row in _phase1_4_subset(
+            records, label="N1", singleton_only=singleton_only
+        ) if row[field] is not None],
+    )
+    return {"groups": groups, "effect": effect}
+
+
+def analyze_local_multi_fragment_context(
+    output_dir, data_root, *, progress_callback=None
+):
+    """Run the frozen K=2 Phase-1.4 composition analysis without model changes."""
+    records = replay_multi_fragment_records(
+        output_dir, data_root, progress_callback=progress_callback
+    )
+    overall = _phase1_4_stats(records)
+    singleton = _phase1_4_stats(records, singleton_only=True)
+    folds = {
+        fold: _phase1_4_stats(
+            [row for row in records if row["fold"] == fold]
+        )
+        for fold in range(1, 6)
+    }
+    direction = overall["effect"]["direction"]
+    direction_matches = sum(
+        item["effect"]["direction"] == direction for item in folds.values()
+    )
+    absolute_smd = overall["effect"]["absolute_SMD"]
+    fold1_matches = folds[1]["effect"]["direction"] == direction
+    fold5_matches = folds[5]["effect"]["direction"] == direction
+    if (
+        direction == "POSITIVE_LOWER"
+        and absolute_smd is not None and absolute_smd >= MODERATE_SMD
+        and direction_matches >= MIN_FOLD_DIRECTION_MATCHES
+        and fold1_matches and fold5_matches
+    ):
+        status = "SUPPORTED"
+    elif direction != "POSITIVE_LOWER" or (
+        absolute_smd is not None and absolute_smd < SMALL_SMD
+    ):
+        status = "NOT_SUPPORTED"
+    else:
+        status = "INCONCLUSIVE"
+
+    result = {
+        "schema_version": PHASE1_4_SCHEMA_VERSION,
+        "analysis_execution_identity": _git_identity(Path.cwd()),
+        "execution_semantics": {
+            "fragment_graph": "frozen deterministic replay with exact dataset identity check",
+            "neighbor_ordering": "minimum member-point XY distance, tie-break fragment_runtime_id",
+            "NEIGHBOR_COUNT": 2,
+            "spatial_reference": "target frozen best-seed PCA frame",
+            "primary_quantity": "max(L1, L2)",
+            "expected_direction": "POSITIVE_LOWER",
+            "K_search_performed": False,
+            "neighbor_radius": None,
+        },
+        "counts": {
+            "POSITIVE": sum(row["label"] == "POSITIVE" for row in records),
+            "N1": sum(row["label"] == "N1" for row in records),
+        },
+        "overall": overall,
+        "folds": folds,
+        "fold_direction_match_count": direction_matches,
+        "Fold1_matches_overall": fold1_matches,
+        "Fold5_matches_overall": fold5_matches,
+        "singleton": singleton,
+        "predecessor_comparison": {
+            "phase1_3_quantity": "nearest_neighbor_absolute_lateral_projection",
+            "absolute_SMD": 0.431271,
+            "direction": "POSITIVE_LOWER",
+            "phase1_4_absolute_SMD": absolute_smd,
+            "absolute_SMD_change": (
+                None if absolute_smd is None else float(absolute_smd - 0.431271)
+            ),
+        },
+        "decision_rule": {
+            "source": "reuse Phase-1.3 frozen effect/cross-fold consistency rule",
+            "expected_direction": "POSITIVE_LOWER",
+            "overall_absolute_SMD_min": MODERATE_SMD,
+            "matching_fold_direction_min": MIN_FOLD_DIRECTION_MATCHES,
+            "Fold1_and_Fold5_must_match": True,
+            "NOT_SUPPORTED_if_wrong_direction_or_absolute_SMD_below": SMALL_SMD,
+        },
+        "LOCAL_MULTI_FRAGMENT_SUPPORT_COHERENCE": status,
+        "NEIGHBORING_FRAGMENT_CONTEXT_STATUS": status,
+        "MODEL_RETRAINED": False,
+        "FORMAL_FEATURE_ADDED": False,
+        "FRAGMENT_GRAPH_CHANGED": False,
+        "FORMAL_100_EXECUTED": False,
+    }
+    output_dir = Path(output_dir)
+    result_path = output_dir / "phase1_4_local_multi_fragment_analysis.json"
+    record_path = output_dir / "phase1_4_local_multi_fragment_records.csv"
+    result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    fields = (
+        "frame_id", "fragment_identity", "label", "group", "fold",
+        "fragment_type", "target_point_count", "best_seed_component_runtime_id",
+        "best_continuation_axis", "seed_outward_side", "neighbor_count_available",
+        "multi_neighbor_valid", "N1_neighbor_fragment_identity",
+        "N1_neighbor_fragment_type", "N1_neighbor_point_count",
+        "N1_target_contact_source_index", "N1_neighbor_contact_source_index",
+        "N1_neighbor_distance", "N1_neighbor_outward_projection",
+        "N1_neighbor_lateral_projection",
+        "N1_neighbor_absolute_lateral_projection",
+        "N1_neighbor_outward_alignment_cosine", "N2_neighbor_fragment_identity",
+        "N2_neighbor_fragment_type", "N2_neighbor_point_count",
+        "N2_target_contact_source_index", "N2_neighbor_contact_source_index",
+        "N2_neighbor_distance", "N2_neighbor_outward_projection",
+        "N2_neighbor_lateral_projection",
+        "N2_neighbor_absolute_lateral_projection",
+        "N2_neighbor_outward_alignment_cosine", "L1", "L2",
+        "multi_neighbor_lateral_envelope",
     )
     with record_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)

@@ -1,7 +1,10 @@
 import argparse
 import json
 
-from bev_tracking.fragment_learning_neighbor_context import analyze_neighbor_context
+from bev_tracking.fragment_learning_neighbor_context import (
+    analyze_local_multi_fragment_context,
+    analyze_neighbor_context,
+)
 
 
 def parse_args():
@@ -16,6 +19,10 @@ def parse_args():
         "--data-root", default="outputs/fragment_learning_dev_v1/selected_input_cache",
         help="Existing selected 64-frame cache for deterministic graph replay.",
     )
+    parser.add_argument(
+        "--phase", choices=("1.3", "1.4"), default="1.3",
+        help="Reuse this analysis entry for frozen Phase 1.3 or Phase 1.4 semantics.",
+    )
     return parser.parse_args()
 
 
@@ -24,6 +31,32 @@ if __name__ == "__main__":
 
     def progress(index, total, frame_id):
         print(f"[neighbor {index:02d}/{total:02d}] {frame_id}", flush=True)
+
+    if args.phase == "1.4":
+        result, result_path, record_path = analyze_local_multi_fragment_context(
+            args.output_dir, args.data_root, progress_callback=progress
+        )
+        compact = {
+            "counts": result["counts"],
+            "overall": result["overall"],
+            "folds": {
+                fold: item["effect"] for fold, item in result["folds"].items()
+            },
+            "fold_direction_match_count": result["fold_direction_match_count"],
+            "singleton": result["singleton"],
+            "predecessor_comparison": result["predecessor_comparison"],
+            "LOCAL_MULTI_FRAGMENT_SUPPORT_COHERENCE": result[
+                "LOCAL_MULTI_FRAGMENT_SUPPORT_COHERENCE"
+            ],
+            "NEIGHBORING_FRAGMENT_CONTEXT_STATUS": result[
+                "NEIGHBORING_FRAGMENT_CONTEXT_STATUS"
+            ],
+        }
+        print(json.dumps(compact, indent=2))
+        print(f"saved {result_path}")
+        print(f"saved {record_path}")
+        print("PHASE 1.4 READ-ONLY ANALYSIS COMPLETE; NO FEATURE OR MODEL WAS CHANGED")
+        raise SystemExit(0)
 
     result, result_path, record_path = analyze_neighbor_context(
         args.output_dir, args.data_root, progress_callback=progress
