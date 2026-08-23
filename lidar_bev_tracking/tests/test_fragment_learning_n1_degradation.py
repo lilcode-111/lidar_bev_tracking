@@ -34,7 +34,13 @@ class FragmentLearningN1DegradationTest(unittest.TestCase):
             },
             "spearman": {"max_material_gain_vs_Delta_score": {"rho": 0.3}},
         }
-        folds = [{"fold_id": 1, "Delta_AP": -0.1}]
+        folds = [
+            {"fold_id": 1, "Delta_AP": -0.1},
+            {"fold_id": 2, "Delta_AP": -0.1},
+            {"fold_id": 3, "Delta_AP": -0.1},
+            {"fold_id": 4, "Delta_AP": 0.1},
+            {"fold_id": 5, "Delta_AP": 0.1},
+        ]
         scene = {"concentration": {
             "M2_N1_FP": {"top_3_frames": {"ratio": 0.3}},
             "significant_score_up_count": {"top_3_frames": {"ratio": 0.4}},
@@ -43,6 +49,31 @@ class FragmentLearningN1DegradationTest(unittest.TestCase):
         self.assertEqual(
             result["N1_RANKING_DEGRADATION_DIAGNOSIS"],
             "MATERIALITY_BOUNDARY_CONFLICT",
+        )
+
+    def test_two_bad_folds_and_three_nonbad_folds_support_concentration(self):
+        materiality = {
+            "groups": {
+                "ALL_N1": {"max_material_gain": {"P50": 0.03}},
+                "SIGNIFICANT_SCORE_UP_N1": {"max_material_gain": {"P50": 0.04}},
+            },
+            "spearman": {"max_material_gain_vs_Delta_score": {"rho": 0.1}},
+        }
+        folds = [
+            {"fold_id": 1, "Delta_AP": -0.11},
+            {"fold_id": 2, "Delta_AP": 0.01},
+            {"fold_id": 3, "Delta_AP": 0.12},
+            {"fold_id": 4, "Delta_AP": 0.01},
+            {"fold_id": 5, "Delta_AP": -0.12},
+        ]
+        scene = {"concentration": {
+            "M2_N1_FP": {"top_3_frames": {"ratio": 0.26}},
+            "significant_score_up_count": {"top_3_frames": {"ratio": 0.38}},
+        }}
+        result = _conclusion(materiality, folds, scene)
+        self.assertEqual(
+            result["N1_RANKING_DEGRADATION_DIAGNOSIS"],
+            "FOLD / SCENE CONCENTRATED",
         )
 
     def test_overlapping_mechanisms_are_mixed(self):

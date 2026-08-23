@@ -331,7 +331,13 @@ def _conclusion(materiality, folds, scene):
     top3_fp = scene["concentration"]["M2_N1_FP"]["top_3_frames"]["ratio"]
     top3_up = scene["concentration"]["significant_score_up_count"]["top_3_frames"]["ratio"]
     degraded_folds = [row["fold_id"] for row in folds if row["Delta_AP"] < 0.0]
-    scene_supported = top3_fp >= 0.50 or top3_up >= 0.50
+    nondegraded_folds = [row["fold_id"] for row in folds if row["Delta_AP"] >= 0.0]
+    fold_concentrated = (
+        1 <= len(degraded_folds) <= 2 and len(nondegraded_folds) >= 3
+    )
+    scene_supported = (
+        fold_concentrated or top3_fp >= 0.50 or top3_up >= 0.50
+    )
     boundary_supported = (
         rho is not None and rho >= 0.20
         and up_median is not None and all_median is not None and up_median > all_median
@@ -352,7 +358,7 @@ def _conclusion(materiality, folds, scene):
         "descriptive_rule": {
             "boundary": "Spearman(max_material_gain, Delta_score) >= 0.20 and significant-up gain median > all-N1 median",
             "true_regression": "Spearman <= 0 and significant-up gain median <= all-N1 median",
-            "scene_concentrated": "top-3 frame share >= 0.50 for M2 N1-FP or significant score-up count",
+            "fold_scene_concentrated": "degradation occurs in <=2 folds while >=3 folds are non-degrading, or top-3 frame share >= 0.50 for M2 N1-FP/significant score-up count",
             "mixed": "zero or multiple mechanisms meet the descriptive rules",
         },
         "evidence": {
@@ -362,6 +368,8 @@ def _conclusion(materiality, folds, scene):
             "top3_M2_N1_FP_ratio": top3_fp,
             "top3_significant_up_ratio": top3_up,
             "P_vs_N1_degraded_folds": degraded_folds,
+            "P_vs_N1_nondegraded_folds": nondegraded_folds,
+            "fold_concentrated": fold_concentrated,
         },
         "supported_mechanisms": supported,
         "N1_RANKING_DEGRADATION_DIAGNOSIS": result,
